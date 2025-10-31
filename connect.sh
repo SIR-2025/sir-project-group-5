@@ -20,7 +20,7 @@ EOF
 osascript <<EOF
 tell application "Terminal"
     activate
-    do script "cd '$(pwd)'; source .venv/bin/activate; echo 'Run python scripts in this terminal'"
+    do script "cd '$(pwd)'; source .venv/bin/activate; clear; echo 'Run python scripts in this terminal'"
 end tell
 EOF
 
