@@ -114,7 +114,47 @@ def suno_gen(lyrics,topic):
     except Exception as error:
         print(f'Error: {error}')
 
-
+def download_song(audio):
+    """Downloads Mp3 and turns it to wav"""
+    
+    audio_url = audio["audioUrl"]
+    title = audio["title"]
+    mp3_path = f"{title}.mp3"
+    resp = requests.get(audio_url)
+    open(mp3_path, "wb").write(resp.content)
+    print("Song is downloaded")
+    wav_path = f"{title}.wav"
+    sound = AudioSegment.from_mp3(mp3_path)
+    sound.export(wav_path, format="wav")
+    print("converted to wav")
+    os.remove(mp3_path)
+    return wav_path
+    
+def instrumental_gen(style):
+    api = SunoAPI(api_key=SUNO_API_KEY)
+    
+    try:
+        print('Generating music...')
+        music_task_id = api.generate_music(
+            prompt= f"Create a {style} song",
+            customMode=True,
+            style=f'{style}',
+            title=f"{style}-instrumental",
+            instrumental=True,
+            model='V4_5',
+            callBackUrl='https://your-server.com/music-callback'
+            )
+        
+        # Wait for completion
+        music_result = api.wait_for_completion(music_task_id)
+        print(f'Music generated successfully!:{music_result}')
+        final_track = music_result['sunoData'][0]
+        return final_track
+        
+    except Exception as error:
+        print(f'Error: {error}')
+    
+    
 def main():
     print("Starting")
     topic  = input("What is the topic?")
@@ -123,18 +163,7 @@ def main():
     print("lyrics are generated")
     audio = suno_gen(lyrics,topic)
     print("Song is generated")
-    audio_url = audio["audioUrl"]
-    title = audio["title"]
-    title = audio["title"]
-    r = requests.get(audio_url)
-    mp3_path = f"{title}.mp3"
-    open(mp3_path, "wb").write(r.content)
-    print("Song is downloaded")
-    wav_path = f"{title}.wav"
-    sound = AudioSegment.from_mp3(mp3_path)
-    sound.export(wav_path, format="wav")
-    print("converted to wav")
-    os.remove(mp3_path)
+    wav_path = download_song(audio)
 
 
 if __name__ == "__main__":
