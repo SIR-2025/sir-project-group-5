@@ -1,9 +1,12 @@
 import json
 import os
 import time
+from datetime import datetime
 
 import cv2
 import numpy as np
+import mediapipe as mp
+
 from sic_framework.core import sic_logging
 from sic_framework.core.sic_application import SICApplication
 from sic_framework.devices import Nao
@@ -25,16 +28,21 @@ BODY_CONNS = [
     (24, 26), (26, 28), (28, 30), (30, 32),
 ]
 
+mp_pose = mp.solutions.pose
+
+
+def _landmarks_to_array(landmarks) -> np.ndarray:
+    """Convert MediaPipe landmarks to (33,3) normalized array."""
+    return np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark], dtype=np.float32)
+
 
 def _draw_pose_skeleton(frame: np.ndarray, kp_img_norm: np.ndarray) -> None:
     """Draw a simple white skeleton using normalized keypoints on a BGR frame."""
     h, w = frame.shape[:2]
-    # bones
     for a, b in BODY_CONNS:
         xa, ya = int(kp_img_norm[a, 0] * w), int(kp_img_norm[a, 1] * h)
         xb, yb = int(kp_img_norm[b, 0] * w), int(kp_img_norm[b, 1] * h)
         cv2.line(frame, (xa, ya), (xb, yb), (255, 255, 255), 2)
-    # joints
     for i in BODY_IDXS:
         x, y = int(kp_img_norm[i, 0] * w), int(kp_img_norm[i, 1] * h)
         cv2.circle(frame, (x, y), 4, (255, 255, 255), -1)
@@ -46,15 +54,159 @@ def _show_pose_window(pose: Pose, window_name: str = "NAO Current Pose") -> None
     frame = np.zeros((h, w, 3), dtype=np.uint8)
     _draw_pose_skeleton(frame, pose.kp_img_norm)
     cv2.imshow(window_name, frame)
-    # small wait to refresh window; ignore key presses
     cv2.waitKey(1)
+
+
+def _ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def _auto_pose_path(base_dir: str, idx: int) -> str:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return os.path.join(base_dir, f"pose_{ts}_{idx:02d}.json")
+
+
+def _record_poses_with_camera(
+    logger,
+    out_dir: str,
+    duration: float = 30.0,
+    sample_interval: float = 5.0,
+    countdown: int = 3,
+    camera_index: int = 0,
+) -> list[Pose]:
+    """
+    Open the laptop camera, wait for SPACE, show a countdown, then record poses for `duration` seconds.
+    Every `sample_interval` seconds, capture a pose and save it to JSON (only kp_img_norm).
+    Returns a list of Pose objects corresponding to the saved poses.
+    """
+    _ensure_dir(out_dir)
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        logger.error(f"Cannot open camera index {camera_index}")
+        return []
+
+    window_name = "Camera / Pose Recorder"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
+    recorded_poses: list[Pose] = []
+    logger.info("Press SPACE to start recording (30s). ESC to cancel.")
+
+    try:
+        recording = False
+        countdown_end = None
+        record_start = None
+        next_sample = None
+        pose_idx = 0
+
+        with mp_pose.Pose(
+            model_complexity=1,
+            enable_segmentation=False,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
+        ) as pose_detector:
+
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+
+                frame = cv2.flip(frame, 1)
+                disp = frame.copy()
+
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:  # ESC
+                    logger.info("Recording aborted by user.")
+                    break
+
+                now = time.perf_counter()
+
+                if not recording:
+                    cv2.putText(
+                        disp,
+                        "SPACE: start recording (30s) | ESC: quit",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (255, 255, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
+                    if key == 32:  # SPACE
+                        recording = True
+                        countdown_end = now + countdown
+                        record_start = None
+                        logger.info("Countdown started.")
+                else:
+                    if record_start is None:
+                        remaining = max(0, int(countdown_end - now) + 1)
+                        cv2.putText(
+                            disp,
+                            str(remaining),
+                            (disp.shape[1] // 2 - 20, 100),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            2.5,
+                            (0, 255, 255),
+                            6,
+                            cv2.LINE_AA,
+                        )
+                        if now >= countdown_end:
+                            record_start = time.perf_counter()
+                            next_sample = record_start
+                            logger.info("Recording poses for 30 seconds...")
+                    else:
+                        elapsed = now - record_start
+                        remaining = max(0.0, duration - elapsed)
+                        cv2.putText(
+                            disp,
+                            f"REC {remaining:04.1f}s",
+                            (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 0, 255),
+                            2,
+                            cv2.LINE_AA,
+                        )
+
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        rgb.flags.writeable = False
+                        res = pose_detector.process(rgb)
+                        rgb.flags.writeable = True
+
+                        if res.pose_landmarks:
+                            kp = _landmarks_to_array(res.pose_landmarks)
+                            _draw_pose_skeleton(disp, kp)
+
+                            if now >= next_sample and elapsed <= duration:
+                                pose_obj = Pose(kp_img_norm=kp)
+                                recorded_poses.append(pose_obj)
+                                out_path = _auto_pose_path(out_dir, pose_idx)
+                                with open(out_path, "w") as f:
+                                    json.dump({"kp_img_norm": kp.tolist()}, f, indent=2)
+                                logger.info(f"Saved pose #{pose_idx} → {out_path}")
+                                pose_idx += 1
+                                next_sample += sample_interval
+
+                        if elapsed > duration:
+                            logger.info("Recording finished.")
+                            break
+
+                cv2.imshow(window_name, disp)
+
+    finally:
+        cap.release()
+        cv2.destroyWindow(window_name)
+
+    logger.info(f"Total recorded poses: {len(recorded_poses)}")
+    return recorded_poses
 
 
 class NaoTeacher(SICApplication):
     """
     NAO teacher demo application.
-    Load a sequence of poses, execute them on NAO,
-    and show the current target pose in a window on the laptop.
+    1. NAO stands and opens the laptop camera.
+    2. On SPACE: countdown + 30s recording; every 5s a pose is captured and saved.
+    3. After recording, NAO replicates the recorded poses and the current target pose
+       is displayed on the laptop.
     """
 
     def __init__(self):
@@ -72,38 +224,42 @@ class NaoTeacher(SICApplication):
 
     def run(self):
         """Main application logic."""
-        window_name = "NAO Current Pose"
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        nao_pose_window = "NAO Current Pose"
+        cv2.namedWindow(nao_pose_window, cv2.WINDOW_NORMAL)
 
         try:
             self.nao.motion.request(NaoPostureRequest("Stand", 0.5))
             time.sleep(1)
 
-            # Eyes blue at start
+            # Eyes blue at start (ready to record)
             self.nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 0, 1, 0))
 
-            poses = []
             pose_dir = os.path.join(os.path.dirname(__file__), "poses")
-            self.logger.info(f"Loading poses from: {pose_dir}")
+            self.logger.info(f"Recording poses into: {pose_dir}")
 
-            for fname in sorted(os.listdir(pose_dir)):
-                if fname.endswith(".json"):
-                    path = os.path.join(pose_dir, fname)
-                    with open(path, "r") as f:
-                        data = json.load(f)
-                    poses.append(Pose(kp_img_norm=data["kp_img_norm"]))
-                    self.logger.info(f"Loaded pose: {fname}")
+            recorded_poses = _record_poses_with_camera(
+                logger=self.logger,
+                out_dir=pose_dir,
+                duration=30.0,
+                sample_interval=5.0,
+                countdown=3,
+                camera_index=0,
+            )
 
-            for pose in poses:
-                # Show the pose on the laptop
-                _show_pose_window(pose, window_name=window_name)
+            if not recorded_poses:
+                self.logger.info("No poses recorded; going to rest.")
+                self.nao.autonomous.request(NaoRestRequest())
+                return
+
+            # After recording, change eyes color to indicate playback phase
+            self.nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0.5, 0, 0.5))
+
+            for pose in recorded_poses:
+                _show_pose_window(pose, window_name=nao_pose_window)
 
                 # Eyes red while moving to pose
                 self.nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
                 replicate_pose(pose, self.nao_ip, mirror=True, duration=2.0)
-
-                # Hold briefly with pose and preview visible
-                time.sleep(1)
 
                 # Eyes green to indicate pose reached
                 self.nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
