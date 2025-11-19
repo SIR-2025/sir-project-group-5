@@ -382,7 +382,9 @@ class NaoTeachMode(SICApplication):
                 if frame is not None:
                     frame_bgr = np.ascontiguousarray(frame)
                     frame_bgr = cv2.flip(frame_bgr, 1)
-
+                    scale = 2.0
+                    h, w = frame_bgr.shape[:2]
+                    frame_bgr = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)))
                     if self._learning_active:
                         self._draw_learning_skeleton(frame_bgr)
 
