@@ -1,15 +1,85 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/18O6qkbP)
-# SIC-SIR Template
-Template for group projects of Socially Intelligent Robotics (SIR) of the Vrije Universiteit Amsterdam (VU) in 2025.
+# SIR Project - Group 5  
+### NAO Interactive Dance Teacher
 
-# Instructions
-- You can follow the SIC installation instructions with this repository instead of sic_applications.
-- You can add all your project code in root and subfolders. 
-- Regularly commit and push your updates.
-- Make sure to acknowledge the contributions of involved team members (in commit messages and in individual logbook).
-- You will receive feedback on your code in week 5.
-- Your code will be graded in the end.
+This project implements a fully interactive NAO robot behavior where NAO:
 
-# Information
-- More info about SIC: https://social-ai-vu.github.io/social-interaction-cloud/index.html
-- More info about SIR: Canvas
+1. **Greets a user and generates a custom song** (via Dialogflow CX + TTS).  
+2. **Watches the user dance** using its camera.  
+3. **Records multiple static dance poses** using MediaPipe Pose.  
+4. **Mirrors and maps human poses to NAO joints**, replaying the dance back.  
+5. **Teaches the learned dance** to the next person that interacts with it.
+
+The full pipeline is multimodal (vision + speech) and runs live on the NAO robot using SIC Framework components.
+
+---
+
+## Entry Point
+
+Run:
+```bash
+python main.py
+```
+
+`main.py` launches the interactive application (`NaoTeachMode`) which handles:
+
+- NAO initialization (camera, mic, TTS, motion, LEDs)  
+- Dialogflow CX communication  
+- Pose learning & playback  
+- Live OpenCV GUI with skeleton overlays  
+- Intent-based behavior switching (e.g., “start teaching”)  
+
+---
+
+## Modules
+
+### `modules/pose_teacher.py`
+Headless MediaPipe-based pose recording system:
+- Captures poses every few seconds  
+- Outputs JSON & in-memory pose objects  
+- Supports GUI callbacks for live feedback  
+
+### `modules/replicate_json_pose.py`
+Converts normalized MediaPipe keypoints to NAO joint angles  
+and executes the corresponding NAO motion:
+- Shoulder & elbow inference  
+- Joint limit clamping  
+- Mirroring for camera alignment  
+
+### `runners/teacher_runner.py`
+Simple wrapper used by the main application to drive recording and playback.
+
+### `main.py`
+Full application logic:
+- Dialogflow loop  
+- Intent routing  
+- Camera UI and overlays  
+- Teaching workflow (record → playback → teach)  
+
+---
+
+## Dialogflow CX
+
+Use voice commands such as:
+
+- **“Start teaching”**  
+- **“Stop teaching”**  
+- (Extendable to custom commands for music, conversation, etc.)
+
+NAO replies using TTS and executes appropriate behaviors.
+
+---
+
+## Directory Structure
+
+```
+main.py
+modules/
+pose_teacher.py
+replicate_json_pose.py
+runners/
+teacher_runner.py
+conf/
+google/google-key.json
+poses/
+```
+---

@@ -1,3 +1,14 @@
+"""Utilities to record human poses with MediaPipe and replay them on a NAO robot.
+
+This module provides three main operations:
+
+- `record_poses`: capture poses from a video stream and save them as JSON files.
+- `playback_poses`: execute a sequence of poses on a NAO robot.
+- `teach_sequence`: full teaching routine that records poses and replays them.
+
+It is designed to be headless: no OpenCV windows or UI are opened.
+"""
+
 from __future__ import annotations
 
 import json
@@ -30,7 +41,12 @@ BODY_CONNS = [
 
 
 def _log(logger, msg: str) -> None:
-    """Small logger helper that falls back to print()."""
+    """Log a message using the provided logger, or print it if logger is None.
+
+    Args:
+        logger: Logger-like object with an `.info()` method, or None.
+        msg: Message string to log.
+    """
     if logger is not None:
         logger.info(msg)
     else:
@@ -38,21 +54,48 @@ def _log(logger, msg: str) -> None:
 
 
 def _ensure_dir(path: str) -> None:
+    """Create the given directory path if it does not already exist.
+
+    Args:
+        path: Directory path to create.
+    """
     os.makedirs(path, exist_ok=True)
 
 
 def _auto_pose_path(base_dir: str, idx: int) -> str:
+    """Generate a timestamped JSON file path for a stored pose.
+
+    Args:
+        base_dir: Base directory where pose files are stored.
+        idx: Pose index used in the filename.
+
+    Returns:
+        Full path to the JSON file for this pose.
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return os.path.join(base_dir, f"pose_{ts}_{idx:02d}.json")
 
 
 def _landmarks_to_array(landmarks) -> np.ndarray:
-    """Convert MediaPipe landmarks to (33, 3) normalized array."""
+    """Convert MediaPipe pose landmarks to a (33, 3) float32 array.
+
+    Args:
+        landmarks: A MediaPipe `NormalizedLandmarkList` with 33 landmarks.
+
+    Returns:
+        Numpy array of shape (33, 3) with (x, y, z) coordinates in normalized
+        image coordinates.
+    """
     return np.array([[lm.x, lm.y, lm.z] for lm in landmarks.landmark], dtype=np.float32)
 
 
 def _draw_pose_skeleton(frame: np.ndarray, kp_img_norm: np.ndarray) -> None:
-    """Draw a simple white skeleton (utility, not used by main app)."""
+    """Draw a simple white pose skeleton on an image.
+
+    Args:
+        frame: BGR image on which to draw (modified in place).
+        kp_img_norm: Array of shape (33, 3) with normalized (x, y, z) keypoints.
+    """
     h, w = frame.shape[:2]
     for a, b in BODY_CONNS:
         xa, ya = int(kp_img_norm[a, 0] * w), int(kp_img_norm[a, 1] * h)
@@ -73,19 +116,36 @@ def record_poses(
     on_pose_saved: Callable[[Pose, int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None], None] | None = None,
 ) -> List[Pose]:
-    """
-    Record poses from frames provided by `frame_provider`.
+    """Record a sequence of poses from frames provided by `frame_provider`.
 
-    - Waits `countdown` seconds (time-based).
-    - For `duration` seconds, every `sample_interval` seconds:
-        - grabs a frame (BGR)
-        - runs MediaPipe Pose
-        - if pose detected, saves kp_img_norm to JSON and returns Pose objects.
-        - calls `on_pose_saved(pose, index)` each time, if provided.
-    - On each processed frame, if `on_kp_frame` is provided, it is called with
-      the current kp_img_norm (or None if no pose was detected).
+    The function runs headless.
 
-    No windows, no OpenCV UI here. Completely headless.
+    Workflow:
+        1. Wait `countdown` seconds.
+        2. For up to `duration` seconds, repeatedly:
+           - grab a frame from `frame_provider` (BGR, or None),
+           - run MediaPipe Pose detection,
+           - every `sample_interval` seconds, if a pose is detected:
+               * store the keypoints to a JSON file under `out_dir`,
+               * append a `Pose` object to the result list,
+               * call `on_pose_saved(pose, index)` if provided.
+        3. For every processed frame, call `on_kp_frame(kp)` if provided, where
+           `kp` is the current keypoint array or None if no pose was detected.
+
+    Args:
+        logger: Logger-like object or None.
+        frame_provider: Callable that returns a BGR frame (np.ndarray) or None.
+        out_dir: Directory where JSON pose files will be stored.
+        duration: Total recording duration in seconds.
+        sample_interval: Time in seconds between saved poses.
+        countdown: Time in seconds to wait before starting recording.
+        on_pose_saved: Optional callback called as `on_pose_saved(pose, idx)`
+            whenever a new pose is saved.
+        on_kp_frame: Optional callback called as `on_kp_frame(kp)` on each
+            processed frame; `kp` is a (33, 3) array or None.
+
+    Returns:
+        List of `Pose` objects in the order they were captured.
     """
     _ensure_dir(out_dir)
     _log(logger, "Starting pose recording...")
@@ -118,6 +178,7 @@ def record_poses(
 
             frame = frame_provider()
             if frame is None:
+                # No frame available; wait a bit and retry.
                 time.sleep(0.01)
                 continue
 
@@ -160,12 +221,24 @@ def playback_poses(
     sleep_between: float = 1.0,
     on_pose_start: Callable[[int], None] | None = None,
 ) -> None:
-    """
-    Playback a list of poses on NAO.
-    No camera usage; just motions.
+    """Replay a sequence of poses on a NAO robot.
 
-    If `on_pose_start` is provided, it is called with the pose index
-    right before that pose is executed.
+    The camera is not used here; only NAO motions and LED feedback are used.
+
+    For each pose:
+        - Face LEDs are set to red.
+        - The pose is executed on NAO via `replicate_pose`.
+        - Face LEDs are set to green.
+        - The function sleeps `sleep_between` seconds.
+
+    Args:
+        nao: NAO device handle with `.leds` interface.
+        nao_ip: IP address of the NAO robot used by `replicate_pose`.
+        poses: List of `Pose` objects to execute in order.
+        logger: Logger-like object or None.
+        sleep_between: Pause in seconds between consecutive poses.
+        on_pose_start: Optional callback called as `on_pose_start(idx)` right
+            before pose `idx` is executed.
     """
     if not poses:
         _log(logger, "No poses to playback.")
@@ -193,18 +266,30 @@ def teach_sequence(
     on_pose_start: Callable[[int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None], None] | None = None,
 ) -> None:
-    """
-    Full teacher sequence (headless):
+    """Run the full pose teaching sequence on NAO (record + playback).
 
-    1. NAO to Stand.
-    2. Eyes blue: recording phase.
-    3. Record poses from NAO camera (via frame_provider).
-       - `on_pose_saved(pose, idx)` is called whenever a pose is captured.
-       - `on_kp_frame(kp)` is called for each processed frame (or None).
-    4. Eyes orange: playback phase.
-    5. Playback poses on NAO.
-       - `on_pose_start(idx)` is called when each pose starts.
-    6. NAO to rest.
+    High-level flow:
+        1. Put NAO in `Stand` posture.
+        2. Set face LEDs to blue (recording phase).
+        3. Call `record_poses` to capture poses from `frame_provider` and
+           store them under `pose_dir`.
+           - `on_pose_saved(pose, idx)` is forwarded to `record_poses`.
+           - `on_kp_frame(kp)` is forwarded to `record_poses`.
+        4. If no poses are recorded, send NAO to rest and return.
+        5. Set face LEDs to orange (playback phase).
+        6. Call `playback_poses` to execute the recorded poses on NAO.
+           - `on_pose_start(idx)` is forwarded to `playback_poses`.
+        7. Send NAO to rest.
+
+    Args:
+        nao: NAO device handle with `.motion`, `.leds`, and `.autonomous`.
+        nao_ip: IP address of the NAO robot.
+        frame_provider: Callable that returns a BGR frame (np.ndarray) or None.
+        logger: Logger-like object or None.
+        pose_dir: Directory where pose JSON files will be saved.
+        on_pose_saved: Optional callback forwarded to `record_poses`.
+        on_pose_start: Optional callback forwarded to `playback_poses`.
+        on_kp_frame: Optional callback forwarded to `record_poses`.
     """
     _ensure_dir(pose_dir)
 
@@ -218,8 +303,8 @@ def teach_sequence(
         logger=logger,
         frame_provider=frame_provider,
         out_dir=pose_dir,
-        duration=30.0,
-        sample_interval=5.0,
+        duration=12.0,
+        sample_interval=2.0,
         countdown=3,
         on_pose_saved=on_pose_saved,
         on_kp_frame=on_kp_frame,

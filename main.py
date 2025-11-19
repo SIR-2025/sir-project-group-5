@@ -1,3 +1,18 @@
+"""
+Interactive NAO teaching application.
+
+This script runs a SICApplication that:
+
+- Connects to a NAO robot and its camera.
+- Streams audio to Dialogflow CX and reacts to detected intents.
+- Runs a "teaching" routine on intent, recording poses via
+  MediaPipe and replaying them on NAO.
+- Shows a live OpenCV window with:
+    * NAO camera view.
+    * Live learning skeleton overlay.
+    * Thumbnails of saved poses, highlighting the one currently replayed.
+"""
+
 from __future__ import annotations
 
 import json
@@ -24,6 +39,7 @@ from sic_framework.services.dialogflow_cx.dialogflow_cx import (
 from runners.teacher_runner import run_teacher
 from modules.replicate_json_pose import Pose
 
+# MediaPipe-style body indices and connections for drawing skeletons.
 BODY_IDXS = list(range(11, 33))
 BODY_CONNS = [
     (11, 12),
@@ -36,7 +52,18 @@ BODY_CONNS = [
 
 
 class NaoTeachMode(SICApplication):
+    """SICApplication that lets NAO learn and replay dance poses.
+
+    Responsibilities:
+        - Initialize NAO robot, camera callback, and Dialogflow CX.
+        - Maintain the latest camera frame and overlay data (poses / skeleton).
+        - Handle Dialogflow intents (start/stop teaching).
+        - Drive the teacher pipeline in a background thread.
+        - Render an OpenCV window with camera and overlays.
+    """
+
     def __init__(self):
+        """Create the application and perform basic setup."""
         super(NaoTeachMode, self).__init__()
         self.set_log_level(sic_logging.INFO)
 
@@ -104,11 +131,10 @@ class NaoTeachMode(SICApplication):
     # Camera handling
     # ----------------------------------------------------------
     def _on_image(self, msg: CompressedImageMessage):
-        """
-        Camera callback: keep only latest frame.
+        """Camera callback: store latest frame as BGR for OpenCV.
 
-        SIC / NAO give RGB; we convert here once to BGR and store that,
-        we treat frames as standard OpenCV BGR.
+        SIC / NAO provide RGB images. We convert once to BGR and keep only
+        the latest frame, which is then used by the GUI and teacher module.
         """
         img = msg.image
         if img is None:
@@ -116,24 +142,24 @@ class NaoTeachMode(SICApplication):
         self._last_frame = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
     def get_latest_frame(self) -> np.ndarray | None:
-        """Return latest camera frame as BGR, or None."""
+        """Return the latest camera frame as BGR, or None if unavailable."""
         return self._last_frame
 
     # ----------------------------------------------------------
     # Overlay helpers (poses + live learning skeleton)
     # ----------------------------------------------------------
     def _on_pose_saved(self, pose: Pose, idx: int) -> None:
-        """Called by teacher module each time a pose is recorded."""
+        """Store kp_img_norm for overlay every time a pose is recorded."""
         with self._overlay_lock:
             self._overlay_poses.append(pose.kp_img_norm.copy())
 
     def _on_pose_start(self, idx: int) -> None:
-        """Called by teacher module when a pose is about to be executed."""
+        """Update index of the pose that is currently being replayed."""
         with self._overlay_lock:
             self._active_pose_idx = idx
 
     def _on_learning_frame_kp(self, kp: np.ndarray | None) -> None:
-        """Called by teacher module each processed frame during recording."""
+        """Update the live learning skeleton for the last processed frame."""
         with self._overlay_lock:
             self._learning_kp = kp
 
@@ -143,7 +169,13 @@ class NaoTeachMode(SICApplication):
         kp_img_norm: np.ndarray,
         color: tuple[int, int, int],
     ) -> None:
-        """Draw skeleton into a ROI using normalized image coordinates."""
+        """Draw a pose skeleton into a given ROI using normalized coordinates.
+
+        Args:
+            roi: Image region (BGR) to draw into.
+            kp_img_norm: (33, 2/3) normalized keypoints in [0, 1].
+            color: BGR color for lines and joints.
+        """
         h, w = roi.shape[:2]
         for a, b in BODY_CONNS:
             xa, ya = int(kp_img_norm[a, 0] * w), int(kp_img_norm[a, 1] * h)
@@ -154,9 +186,9 @@ class NaoTeachMode(SICApplication):
             cv2.circle(roi, (x, y), 3, color, -1)
 
     def _draw_pose_thumbnails(self, frame: np.ndarray) -> None:
-        """
-        Draw saved poses as small overlays at the bottom of the camera view.
-        The currently executed pose is drawn in green.
+        """Draw saved poses as small overlays at the bottom of the camera view.
+
+        The currently executed pose (if any) is highlighted in green.
         """
         h, w = frame.shape[:2]
 
@@ -209,9 +241,10 @@ class NaoTeachMode(SICApplication):
             )
 
     def _draw_learning_skeleton(self, frame: np.ndarray) -> None:
-        """
-        Draw the live MediaPipe skeleton for the last processed frame
-        during the learning phase over the camera frame.
+        """Draw the live MediaPipe skeleton during the learning phase.
+
+        The skeleton for the last processed frame is mirrored horizontally
+        (to match the mirrored camera view) and drawn over the full frame.
         """
         with self._overlay_lock:
             kp = self._learning_kp
@@ -228,6 +261,7 @@ class NaoTeachMode(SICApplication):
     # Dialogflow recognition callback (partial results)
     # ----------------------------------------------------------
     def on_recognition(self, message):
+        """Handle streaming recognition results from Dialogflow (speech)."""
         if message.response:
             rr = getattr(message.response, "recognition_result", None)
             if rr and getattr(rr, "is_final", False):
@@ -237,7 +271,7 @@ class NaoTeachMode(SICApplication):
     # Dialogflow intent polling loop (runs in background thread)
     # ----------------------------------------------------------
     def _dialogflow_loop(self):
-        """Continuously call Dialogflow without blocking the GUI/camera."""
+        """Continuously poll Dialogflow CX for final intents in a thread."""
         try:
             while not self._df_stop.is_set():
                 reply = self.dialogflow.request(DetectIntentRequest(self.session_id))
@@ -251,6 +285,12 @@ class NaoTeachMode(SICApplication):
     # Intent handler
     # ----------------------------------------------------------
     def handle_intent(self, reply):
+        """Handle detected intent by triggering behaviors and TTS.
+
+        Currently supported intents:
+            - "start_teaching": start teacher mode.
+            - "stop_teaching": acknowledge stopping (placeholder).
+        """
         intent = reply.intent or ""
         text = reply.fulfillment_message or ""
         self.logger.info(f"Detected intent: {intent}")
@@ -267,6 +307,7 @@ class NaoTeachMode(SICApplication):
     # Behaviors
     # ----------------------------------------------------------
     def start_teaching_mode(self):
+        """Start the teaching routine in a background thread if not active."""
         with self._lock:
             if self.is_teaching:
                 self.nao.tts.request(
@@ -280,6 +321,7 @@ class NaoTeachMode(SICApplication):
         )
 
         def _teacher_thread():
+            """Worker thread that runs the teacher pipeline and updates overlays."""
             try:
                 with self._overlay_lock:
                     self._overlay_poses = []
@@ -307,6 +349,7 @@ class NaoTeachMode(SICApplication):
         threading.Thread(target=_teacher_thread, daemon=True).start()
 
     def stop_teaching_mode(self):
+        """Handle stop_teaching intent (placeholder for more advanced logic)."""
         # todo
         self.nao.tts.request(
             NaoqiTextToSpeechRequest("Got it! I learned your dance.")
@@ -316,6 +359,7 @@ class NaoTeachMode(SICApplication):
     # Main loop: show camera + run DF thread
     # ----------------------------------------------------------
     def run(self):
+        """Run the main event loop: camera UI + Dialogflow background thread."""
         camera_window = "NAO Camera"
         cv2.namedWindow(camera_window, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(camera_window, 720, 720)
