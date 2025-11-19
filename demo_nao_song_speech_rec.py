@@ -1,14 +1,11 @@
 # Import basic preliminaries
 from sic_framework.core.sic_application import SICApplication
 from sic_framework.core import sic_logging
-
-# Import the device(s) we will be using
 from sic_framework.devices import Nao
 from sic_framework.devices.nao import NaoqiTextToSpeechRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoqiAnimationRequest, NaoPostureRequest
 from sic_framework.core.message_python2 import AudioRequest
-
-# Import the service(s) we will be using
+from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.services.dialogflow_cx.dialogflow_cx import (
     DialogflowCX,
     DialogflowCXConf,
@@ -16,49 +13,178 @@ from sic_framework.services.dialogflow_cx.dialogflow_cx import (
     QueryResult,
     RecognitionResult,
 )
-from song_generation import instrumental_gen, download_song
+from openai import OpenAI
 import wave
-
-# Import libraries necessary for the demo
 import json
 from os.path import abspath, join
 import numpy as np
 import openai
 import os
+import threading
+import time
+from openai import OpenAI
+import os
+import requests
+import time
+import requests
+from dotenv import load_dotenv
+from pydub import AudioSegment
+load_dotenv()
+
+#globals
+OPENAI_API_KEY= os.getenv("OPENAI_API_KEY")
+SUNO_API_KEY = os.getenv("SUNO_API_KEY")
 
 
-OPENAI_API_KEY=os.getenv("OPENAI_API_KEY")
+#helper functions
+def lyric_writer(topic,OPEN_AI_API_KEY = OPENAI_API_KEY):
+    client = OpenAI(api_key=OPEN_AI_API_KEY)
+    prompt = (f"""You are a macarena expert that writes  lyrics matching exactly
+the rhythmic structure of the song Macarena by Los del Rio. The lyrics should contain four phrases. The content of the lyrics should be exactly about {topic}.
+
+Task:
+- Produce lyrics that can be sung to the Macarena melody and rythm.
+- The pattern is four lines: 8 / 8 / 8 / 4/ 8 /8 /8 syllables. Eight syllables are equivalent to four beats.
+- Each syllable corresponds to 1/8th beat.
+- The lyrical content must be about the specified topic.
+-The final line has to be Eeeh {topic}
+-The overall lyrics should be educational.
+
+Format:
+-Output only the four lines, one per line.
+- Do one syllable per 1/8th note so it aligns exactly with the Macarena rhythm.
+
+Example: 
+Topic: Artificial Intelligence 
+
+Ai uses data to learn from examples
+models find patterns in large datasets
+they adjust weights to minimize errors
+Eeeh artificial intelligence
+"""
+    )
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini", 
+        messages=[
+            {"role": "system", "content": "You write catchy, singable lines with exact syllable counts."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.8,
+    )
+    return resp.choices[0].message.content.strip()
+
+def suno_gen(lyrics,topic):
+    api = SunoAPI(api_key=SUNO_API_KEY)
+    
+    try:
+        print('Generating music...')
+        music_task_id = api.generate_music(
+            prompt= lyrics,
+            customMode=True,
+            style='Latin Dance. 25 seconds. 103 BPM',
+            title=f"{topic}-macarena",
+            instrumental=False,
+            model='V4_5',
+            callBackUrl='https://your-server.com/music-callback'
+            )
+        music_result = api.wait_for_completion(music_task_id)
+        print(f'Music generated successfully!:{music_result}')
+        final_track = music_result['sunoData'][0]
+        return final_track
+        
+    except Exception as error:
+        print(f'Error: {error}')
+
+def download_song(audio):
+    """Downloads Mp3 and turns it to wav"""
+    
+    audio_url = audio["audioUrl"]
+    title = audio["title"]
+    mp3_path = f"{title}.mp3"
+    resp = requests.get(audio_url)
+    open(mp3_path, "wb").write(resp.content)
+    print("Song is downloaded")
+    wav_path = f"{title}.wav"
+    sound = AudioSegment.from_mp3(mp3_path)
+    sound.export(wav_path, format="wav")
+    print("converted to wav")
+    os.remove(mp3_path)
+    return wav_path
+
+    
+def instrumental_gen(style):
+    api = SunoAPI(api_key=SUNO_API_KEY)
+    
+    try:
+        print('Generating music...')
+        music_task_id = api.generate_music(
+            prompt= f"Create a {style} song",
+            customMode=True,
+            style=f'{style}',
+            title=f"{style}-instrumental",
+            instrumental=True,
+            model='V4_5',
+            callBackUrl='https://your-server.com/music-callback'
+            )
+        music_result = api.wait_for_completion(music_task_id)
+        print(f'Music generated successfully!:{music_result}')
+        final_track = music_result['sunoData'][0]
+        return final_track
+        
+    except Exception as error:
+        print(f'Error: {error}')
+
+
+class SunoAPI:
+    """Instantiatiates the suno api"""
+    def __init__(self,api_key):
+        self.api_key = api_key
+        self.base_url = 'https://api.sunoapi.org/api/v1'
+        self.headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+    
+    def generate_music(self, **options):
+        response = requests.post(f'{self.base_url}/generate', 
+                               headers=self.headers, json=options)
+        result = response.json()
+        
+        if result['code'] != 200:
+            raise Exception(f"Generation failed: {result['msg']}")
+        
+        return result['data']['taskId']
+    
+    
+    def wait_for_completion(self, task_id, max_wait_time=600):
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            status = self.get_task_status(task_id)
+            
+            if status['status'] == 'SUCCESS':
+                return status['response']
+            elif status['status'] == 'FAILED':
+                raise Exception(f"Generation failed: {status.get('errorMessage')}")
+            
+            time.sleep(30)  
+        
+        raise Exception('Generation timeout')
+    
+    def get_task_status(self, task_id):
+        response = requests.get(f'{self.base_url}/generate/record-info?taskId={task_id}',
+                              headers={'Authorization': f'Bearer {self.api_key}'})
+        return response.json()['data']
+    
+
 class NaoSongGeneratorDemo(SICApplication):
-    """
-    NAO Dialogflow CX demo application.
-    
-    Demonstrates NAO robot picking up your intent and replying according to your 
-    trained Dialogflow CX agent.
-
-    IMPORTANT:
-    1. You need to obtain your own keyfile.json from Google Cloud and place it in conf/google/
-       How to get a key? See https://social-ai-vu.github.io/social-interaction-cloud/external_apis/google_cloud.html
-       Save the key in conf/google/google-key.json
-
-    2. You need a trained Dialogflow CX agent:
-       - Create an agent at https://dialogflow.cloud.google.com/cx/
-       - Add intents with training phrases
-       - Train the agent
-       - Note the agent ID and location
-
-    3. The Dialogflow CX service needs to be running:
-       - pip install social-interaction-cloud[dialogflow-cx]
-       - run-dialogflow-cx
-
-    Note: This uses Dialogflow CX (v3), which is different from Dialogflow ES (v2).
-    """
-    
+    """for the song generation"""
     def __init__(self):
         # Call parent constructor (handles singleton initialization)
         super(NaoSongGeneratorDemo, self).__init__()
         
         # Demo-specific initialization
-        self.nao_ip = "10.0.0.243"  # TODO: Replace with your NAO's IP address
+        self.nao_ip = "10.0.0.245"  # TODO: Replace with your NAO's IP address
         self.dialogflow_keyfile_path = abspath(join( "conf", "google", "google-key.json"))
         self.nao = None
         self.dialogflow_cx = None
@@ -89,20 +215,20 @@ class NaoSongGeneratorDemo(SICApplication):
                         self.logger.info("Transcript: {transcript}".format(transcript=rr.transcript))
 
     
-    def style_extractor(input,OPEN_AI_API_KEY = OPENAI_API_KEY):
+    def style_extractor(self, input,OPEN_AI_API_KEY = OPENAI_API_KEY):
         client = OpenAI(api_key=OPEN_AI_API_KEY)
-        prompt = (f"""You are a style extraction expert given the input extract the style the user wants to create the song about.
+        prompt = (f"""You are a style extraction expert given the input extract the style the user wants to create the song about. Always add 20 seconds.
                   Examples: 
                   User:Create a salsa song
-                  output: salsa 
-                  User: Make a song in the style of hiphop +.
-                  output:hip hop"""
-        )
+                  output: salsa 20 seconds 
+                  User: Make a song in the style of hiphop
+                  output:hip hop 20 seconds"
+                  User: {input}""")
         resp = client.chat.completions.create(
             model="gpt-4o-mini",  # any chat-capable model
             messages=[
                 {"role": "system", "content": "You write catchy, singable lines with exact syllable counts."},
-                {"role": "user", "content": input},
+                {"role": "user", "content": prompt},
             ],
             temperature=0.8,
         )
@@ -144,6 +270,50 @@ class NaoSongGeneratorDemo(SICApplication):
         # Register a callback function to handle recognition results
         self.dialogflow_cx.register_callback(callback=self.on_recognition)
 
+
+    def stretching_routine(self):
+        try:
+            self.nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Let's stretch guys!"))
+            self.nao.motion.request(
+                NaoqiAnimationRequest("animations/Stand/Gestures/Hey_1"), 
+                block=True
+            )
+            time.sleep(0.5)
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Clap your hands!"))
+            self.nao.motion.request(
+                NaoqiAnimationRequest("animations/Stand/Gestures/Clap_1"),
+                block=True
+            )
+            time.sleep(0.5)
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Act as if you were explaining!"))
+            self.nao.motion.request(
+                NaoqiAnimationRequest("animations/Stand/Gestures/Explain_1"),
+                block=True
+            )
+            time.sleep(0.5)
+
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Let your body talk!"))
+            self.nao.motion.request(
+                NaoqiAnimationRequest("animations/Stand/BodyTalk/ScratchHead_1"),
+                block=True
+            )
+            time.sleep(0.5)
+            self.nao.tts.request(NaoqiTextToSpeechRequest("And bow to finish!"))
+            self.nao.motion.request(
+                NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_1"),
+                block=True
+            )
+
+            self.nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
+            self.nao.tts.request(NaoqiTextToSpeechRequest("We are finished!Puh that was hard! Now lets rest until we have enough energy for the song!"))
+
+        except Exception as e:
+            self.logger.error(f"Error in stretching_routine: {e}")
+            self.nao.autonomous.request(NaoRestRequest())
+
+
+
     def play_audio(self):
         try:
             self.logger.info("Passing audio to nao")
@@ -157,18 +327,14 @@ class NaoSongGeneratorDemo(SICApplication):
     
     
     def run(self):
-        """Main application loop."""
+        """Main loop"""
         try:
-            # Demo starts
             self.nao.tts.request(NaoqiTextToSpeechRequest("Hello, I am Nao, lets make a song!!! Let me know which style you want!"))
             self.logger.info(" -- Ready -- ")
             
             while not self.shutdown_event.is_set():
                 self.logger.info(" ----- Your turn to talk!")
-                
-                # Request intent detection with the current session
                 reply = self.dialogflow_cx.request(DetectIntentRequest(self.session_id))
-                # Log the transcript
                 if reply.transcript:
                     self.logger.info("User said: {text}".format(text=reply.transcript))
                     self.style = self.style_extractor(reply.transcript)
@@ -179,10 +345,11 @@ class NaoSongGeneratorDemo(SICApplication):
                     self.logger.info("User said nothing")
                     self.style = "hip-hop"
                 
-            
+                stretch_thread = threading.Thread(target = self.stretching_routine,daemon=True)
+                stretch_thread.start()
                 self.song = instrumental_gen(self.style)
                 self.downloaded = download_song(self.song)
-                self.wavefile = wave.open(self.audio_file, "rb")
+                self.wavefile = wave.open(self.downloaded, "rb")
                 self.samplerate = self.wavefile.getframerate()
                 self.logger.info("Passing audio to nao")
                 self.wavefile.rewind()
@@ -192,15 +359,15 @@ class NaoSongGeneratorDemo(SICApplication):
                     
         except KeyboardInterrupt:
             self.logger.info("Demo interrupted by user")
+            self.nao.autonomous.request(NaoRestRequest())
         except Exception as e:
             self.logger.error("Exception: {}".format(e))
-            import traceback
-            traceback.print_exc()
+            self.nao.autonomous.request(NaoRestRequest())
         finally:
+            self.nao.autonomous.request(NaoRestRequest())
             self.shutdown()
 
 
 if __name__ == "__main__":
-    # Create and run the demo
     demo = NaoSongGeneratorDemo()
     demo.run()
