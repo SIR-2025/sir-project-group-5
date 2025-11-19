@@ -1,0 +1,20 @@
+social-interaction-cloud[whisper,dialogflow]
+openai>=1.42.0
+pydub>=0.25.1
+ffmpeg-python>=0.2.0
+numpy>=1.26.0
+requests>=2.31.0
+python-dotenv>=1.0.1
+protobuf>=4.25.1
+soundfile>=0.12.1
+orjson>=3.10.0
+google-cloud-dialogflow-cx>=1.9.0
+google-auth>=2.27.0
+grpcio>=1.60.0
+anyio>=4.0.0
+PyAudio>=0.2.13   
+pathlib==1.0.1   # For Python < 3.10
+whisper>=1.1.10    # openai whisper library
+
+# ADD THIS FOR qi / naoqi
+naoqi-python-sdk==2.5.7.1
