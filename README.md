@@ -15,6 +15,10 @@ The full pipeline is multimodal (vision + speech) and runs live on the NAO robot
 
 ## Entry Point
 
+# For all Python dependencies, install requirements.txt: 
+pip install -r requirements.txt
+
+
 Run:
 ```bash
 python main.py
@@ -54,6 +58,12 @@ Full application logic:
 - Intent routing  
 - Camera UI and overlays  
 - Teaching workflow (record → playback → teach)  
+### demo_nao_song_speech_rec.py
+Generates song based on user input:
+-extracts the topic/style the user wants
+-creates lyrics if requested
+-creates either instrumental or lyrics based song 
+-plays the song on naos audio
 
 ---
 
