@@ -212,7 +212,7 @@ class NaoTeacher(SICApplication):
     def __init__(self):
         super(NaoTeacher, self).__init__()
 
-        self.nao_ip = "10.0.0.181"
+        self.nao_ip = "10.15.2.86"
         self.nao = None
 
         self.set_log_level(sic_logging.INFO)
