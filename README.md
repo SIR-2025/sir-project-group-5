@@ -15,6 +15,10 @@ The full pipeline is multimodal (vision + speech) and runs live on the NAO robot
 
 ## Entry Point
 
+# For all Python dependencies, install requirements.txt: 
+pip install -r requirements.txt
+
+
 Run:
 ```bash
 python main.py
