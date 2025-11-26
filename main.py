@@ -7,6 +7,9 @@ This script runs a SICApplication that:
 - Streams audio to Dialogflow CX and reacts to detected intents.
 - Runs a "teaching" routine on intent, recording poses via
   MediaPipe and replaying them on NAO.
+- Runs a "learning" routine on intent, where NAO demonstrates
+  stored poses and waits up to 15 seconds for imitation before
+  going to the next pose.
 - Shows a live OpenCV window with:
     * NAO camera view.
     * Live learning skeleton overlay.
@@ -37,6 +40,7 @@ from sic_framework.services.dialogflow_cx.dialogflow_cx import (
 )
 
 from runners.teacher_runner import run_teacher
+from runners.learner_runner import run_learner
 from modules.replicate_json_pose import Pose
 
 # MediaPipe-style body indices and connections for drawing skeletons.
@@ -67,7 +71,7 @@ class NaoTeachMode(SICApplication):
         super(NaoTeachMode, self).__init__()
         self.set_log_level(sic_logging.INFO)
 
-        self.nao_ip = "10.0.0.245"  # <- adjust to your NAO IP
+        self.nao_ip = "10.0.0.151"  # <- adjust to your NAO IP
         self.keyfile_path = abspath(join("conf", "google", "google-key.json"))
 
         self.nao: Nao | None = None
@@ -88,7 +92,10 @@ class NaoTeachMode(SICApplication):
         self._overlay_poses: list[np.ndarray] = []
         self._active_pose_idx: int | None = None
 
-        # live mediapipe skeleton while learning
+        # poses taught in the current session
+        self._taught_poses: list[Pose] = []
+
+        # live mediapipe skeleton while teaching/learning
         self._learning_kp: np.ndarray | None = None
         self._learning_active: bool = False
 
@@ -125,7 +132,10 @@ class NaoTeachMode(SICApplication):
         self.dialogflow = DialogflowCX(conf=conf_df, input_source=self.nao.mic)
         self.dialogflow.register_callback(self.on_recognition)
 
-        self.logger.info("Setup complete. Say 'start teaching' to begin.")
+        self.logger.info(
+            "Setup complete. Say 'start teaching' to record a dance, "
+            "or 'start learning' to practice the dance together."
+        )
 
     # ----------------------------------------------------------
     # Camera handling
@@ -151,12 +161,22 @@ class NaoTeachMode(SICApplication):
     def _on_pose_saved(self, pose: Pose, idx: int) -> None:
         """Store kp_img_norm for overlay every time a pose is recorded."""
         with self._overlay_lock:
+            self._taught_poses.append(pose)              # keep Pose objects
             self._overlay_poses.append(pose.kp_img_norm.copy())
 
     def _on_pose_start(self, idx: int) -> None:
-        """Update index of the pose that is currently being replayed."""
+        """Update index of the pose that is currently being replayed / demonstrated."""
         with self._overlay_lock:
             self._active_pose_idx = idx
+
+    def _on_pose_learned(self, idx: int) -> None:
+        """Optional callback when a pose is successfully imitated."""
+        try:
+            self.nao.tts.request(
+                NaoqiTextToSpeechRequest(f"Nice! You matched pose number {idx + 1}.")
+            )
+        except Exception:
+            self.logger.exception("Error while giving TTS feedback on pose learned")
 
     def _on_learning_frame_kp(self, kp: np.ndarray | None) -> None:
         """Update the live learning skeleton for the last processed frame."""
@@ -299,9 +319,10 @@ class NaoTeachMode(SICApplication):
 
         if intent == "start_teaching":
             self.start_teaching_mode()
+        elif intent == "start_learning":
+            self.start_learning_mode()
         elif intent == "stop_teaching":
             self.stop_teaching_mode()
-        # Add other intents here (play_music, etc.)
 
     # ----------------------------------------------------------
     # Behaviors
@@ -309,9 +330,9 @@ class NaoTeachMode(SICApplication):
     def start_teaching_mode(self):
         """Start the teaching routine in a background thread if not active."""
         with self._lock:
-            if self.is_teaching:
+            if self.is_teaching or self.is_learning:
                 self.nao.tts.request(
-                    NaoqiTextToSpeechRequest("I'm already learning.")
+                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
                 )
                 return
             self.is_teaching = True
@@ -325,6 +346,7 @@ class NaoTeachMode(SICApplication):
             try:
                 with self._overlay_lock:
                     self._overlay_poses = []
+                    self._taught_poses = []       # clear poses of this session
                     self._active_pose_idx = None
                     self._learning_kp = None
                     self._learning_active = True
@@ -348,11 +370,71 @@ class NaoTeachMode(SICApplication):
 
         threading.Thread(target=_teacher_thread, daemon=True).start()
 
+    def start_learning_mode(self):
+        """Start the learning routine in a background thread if not active."""
+        with self._lock:
+            if self.is_teaching or self.is_learning:
+                self.nao.tts.request(
+                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
+                )
+                return
+            self.is_learning = True
+
+        with self._overlay_lock:
+            poses_to_use = list(self._taught_poses)
+
+        if not poses_to_use:
+            # No poses from this session: nothing to learn
+            self.nao.tts.request(
+                NaoqiTextToSpeechRequest(
+                    "You need to teach me a dance first, then we can practice it."
+                )
+            )
+            with self._lock:
+                self.is_learning = False
+            return
+
+        self.nao.tts.request(
+            NaoqiTextToSpeechRequest(
+                "Great, let's practice the dance you taught me!"
+            )
+        )
+
+        def _learner_thread():
+            """Worker thread that runs the learner pipeline and updates overlays."""
+            try:
+                with self._overlay_lock:
+                    self._active_pose_idx = None
+                    self._learning_kp = None
+                    self._learning_active = True
+
+                def _learner_on_kp_frame(kp, dist, idx):
+                    self._on_learning_frame_kp(kp)
+
+                run_learner(
+                    nao=self.nao,
+                    nao_ip=self.nao_ip,
+                    frame_provider=self.get_latest_frame,
+                    logger=self.logger,
+                    poses=poses_to_use,                    # <-- only these poses
+                    on_pose_demo_start=self._on_pose_start,
+                    on_pose_learned=self._on_pose_learned,
+                    on_kp_frame=_learner_on_kp_frame,
+                )
+            finally:
+                with self._overlay_lock:
+                    self._learning_active = False
+                    self._learning_kp = None
+                    self._active_pose_idx = None
+                with self._lock:
+                    self.is_learning = False
+
+        threading.Thread(target=_learner_thread, daemon=True).start()
+
     def stop_teaching_mode(self):
         """Handle stop_teaching intent (placeholder for more advanced logic)."""
-        # todo
         self.nao.tts.request(
-            NaoqiTextToSpeechRequest("Got it! I learned your dance.")
+            NaoqiTextToSpeechRequest("Got it! Let's stop for now.")
         )
 
     # ----------------------------------------------------------
@@ -385,6 +467,7 @@ class NaoTeachMode(SICApplication):
                     scale = 2.0
                     h, w = frame_bgr.shape[:2]
                     frame_bgr = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)))
+
                     if self._learning_active:
                         self._draw_learning_skeleton(frame_bgr)
 
