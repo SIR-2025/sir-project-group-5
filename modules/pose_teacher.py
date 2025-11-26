@@ -6,7 +6,7 @@ This module provides three main operations:
 - `playback_poses`: execute a sequence of poses on a NAO robot.
 - `teach_sequence`: full teaching routine that records poses and replays them.
 
-It is designed to be headless: no OpenCV windows or UI are opened.
+It is headless: no OpenCV windows or UI are opened.
 """
 
 from __future__ import annotations

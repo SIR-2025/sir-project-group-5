@@ -1,3 +1,4 @@
+qi
 social-interaction-cloud[whisper,dialogflow]
 openai>=1.42.0
 pydub>=0.25.1
@@ -15,6 +16,3 @@ anyio>=4.0.0
 PyAudio>=0.2.13   
 pathlib==1.0.1   # For Python < 3.10
 whisper>=1.1.10    # openai whisper library
-
-# ADD THIS FOR qi / naoqi
-naoqi-python-sdk==2.5.7.1
