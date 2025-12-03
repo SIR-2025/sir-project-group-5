@@ -25,6 +25,7 @@ import numpy as np
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
+from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
 
 from modules.replicate_json_pose import Pose, replicate_pose
 
@@ -213,7 +214,7 @@ def learn_sequence(
     logger=None,
     demo_duration: float = 2.5,
     wait_max: float = 15.0,          # <-- now default 15 seconds
-    match_threshold: float = 0.12,
+    match_threshold: float = 0.02,
     stable_frames: int = 5,
     on_pose_demo_start: Callable[[int], None] | None = None,
     on_pose_learned: Callable[[int], None] | None = None,
@@ -287,6 +288,10 @@ def learn_sequence(
 
             # Small pause between poses
             time.sleep(1.0)
+
+        nao.tts.request(
+            NaoqiTextToSpeechRequest("Okay that was the lesson, can you show me now if you remember all the steps")
+        )
 
     finally:
         _log(logger, "Learning sequence finished. Going to rest.")

@@ -29,6 +29,7 @@ conf/dialogflow/*.json
 
 #ignore .env file
 conf/.env
+.env
 
 # Ignore dialogflow keyfiles
 conf/google/*.json.env

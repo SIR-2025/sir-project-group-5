@@ -24,6 +24,7 @@ import numpy as np
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
+from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
 
 from modules.replicate_json_pose import Pose, replicate_pose
 
@@ -317,6 +318,10 @@ def teach_sequence(
 
     # Eyes orange – playback phase
     nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0.5, 0, 0.5))
+
+    nao.tts.request(
+        NaoqiTextToSpeechRequest("Hmm, fancy moves detected. let me try that...")
+    )
 
     playback_poses(
         nao=nao,

@@ -15,7 +15,6 @@ This script runs a SICApplication that:
     * Live learning skeleton overlay.
     * Thumbnails of saved poses, highlighting the one currently replayed.
 """
-
 from __future__ import annotations
 
 import json
@@ -42,6 +41,8 @@ from sic_framework.services.dialogflow_cx.dialogflow_cx import (
 from runners.teacher_runner import run_teacher
 from runners.learner_runner import run_learner
 from modules.replicate_json_pose import Pose
+
+INTENTS = ["shut-down", "Default Welcome Intent", "generate_a_song", "create_music", "nao_learns", "nao_learning_completed", "user_wants_to_learn", "nao_conversation_repeat", "user_learns_dance", "nao_check_dance", "nao_dance_completed_check", "user_thanks", "nao_bye"]
 
 # MediaPipe-style body indices and connections for drawing skeletons.
 BODY_IDXS = list(range(11, 33))
@@ -71,7 +72,7 @@ class NaoTeachMode(SICApplication):
         super(NaoTeachMode, self).__init__()
         self.set_log_level(sic_logging.INFO)
 
-        self.nao_ip = "10.0.0.151"  # <- adjust to your NAO IP
+        self.nao_ip = "10.0.0.181"  # <- adjust to your NAO IP
         self.keyfile_path = abspath(join("conf", "google", "google-key.json"))
 
         self.nao: Nao | None = None
@@ -79,6 +80,7 @@ class NaoTeachMode(SICApplication):
         self.session_id = int(np.random.randint(10000))
 
         self.is_teaching = False
+        self.is_learning = False
         self._lock = threading.Lock()
 
         # latest NAO camera frame (stored as BGR for OpenCV)
@@ -100,6 +102,8 @@ class NaoTeachMode(SICApplication):
         self._learning_active: bool = False
 
         self._overlay_lock = threading.Lock()
+
+        self.last_intent = None
 
         self.setup()
 
@@ -305,24 +309,39 @@ class NaoTeachMode(SICApplication):
     # Intent handler
     # ----------------------------------------------------------
     def handle_intent(self, reply):
-        """Handle detected intent by triggering behaviors and TTS.
+        """Handle detected intent by triggering behaviors and TTS."""
+        intent = getattr(reply, "intent", "") or ""
+        text = getattr(reply, "fulfillment_message", "") or ""
 
-        Currently supported intents:
-            - "start_teaching": start teacher mode.
-            - "stop_teaching": acknowledge stopping (placeholder).
-        """
-        intent = reply.intent or ""
-        text = reply.fulfillment_message or ""
-        self.logger.info(f"Detected intent: {intent}")
+        self.logger.info(f"[{self.last_intent}] Detected intent from DF: {repr(intent)}")
+        self.logger.info(f"Fulfillment message: {repr(text)}")
+
         if text:
             self.nao.tts.request(NaoqiTextToSpeechRequest(text))
 
         if intent == "start_teaching":
             self.start_teaching_mode()
-        elif intent == "start_learning":
+        elif intent == "generate_a_song":
+            self.start_generating_song_mode()
+        elif intent == "nao_wants_to_learn":
             self.start_learning_mode()
-        elif intent == "stop_teaching":
+        elif intent == "user_learns_dance":
             self.stop_teaching_mode()
+        else:
+            self.logger.info(f"Intent '{intent}' not mapped to any behavior.")
+
+        match intent:
+            case "generate_a_song":
+                self.start_generating_song_mode()
+            case "nao_wants_to_learn":
+                self.start_teaching_mode()
+            case "user_learns_dance":
+                self.start_learning_mode()
+            case _:
+                self.logger.info(f"Intent '{intent}' not mapped to any behavior.")
+
+        if intent in INTENTS:
+            self.last_intent = intent
 
     # ----------------------------------------------------------
     # Behaviors
@@ -369,6 +388,46 @@ class NaoTeachMode(SICApplication):
                     self.is_teaching = False
 
         threading.Thread(target=_teacher_thread, daemon=True).start()
+
+    def start_generating_song_mode(self):
+        """Start the jazz song generation routine in a background thread if not active."""
+        with self._lock:
+            if self.is_teaching or self.is_learning:
+                self.nao.tts.request(
+                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
+                )
+                return
+            self.is_learning = True  # mark busy (same as learning)
+
+        def _song_thread():
+            """Worker thread that runs the jazz song generator pipeline."""
+            try:
+                # Clear overlays; this mode does not need skeleton drawing
+                with self._overlay_lock:
+                    self._active_pose_idx = None
+                    self._learning_kp = None
+                    self._learning_active = False
+
+                from runners.song_runner import run_jazz_song
+                run_jazz_song(
+                    nao=self.nao,
+                    nao_ip=self.nao_ip,
+                    logger=self.logger,
+                )
+
+                # Song done
+                self.nao.tts.request(
+                    NaoqiTextToSpeechRequest(
+                        "Your jazz song is ready! I hope you enjoyed it!"
+                    )
+                )
+
+            finally:
+                # Reset busy state
+                with self._lock:
+                    self.is_learning = False
+
+        threading.Thread(target=_song_thread, daemon=True).start()
 
     def start_learning_mode(self):
         """Start the learning routine in a background thread if not active."""
@@ -456,7 +515,7 @@ class NaoTeachMode(SICApplication):
 
         try:
             self.nao.tts.request(
-                NaoqiTextToSpeechRequest("Hello, I'm ready to learn!")
+                NaoqiTextToSpeechRequest("Hello")
             )
 
             while not self.shutdown_event.is_set():
