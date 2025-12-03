@@ -42,7 +42,7 @@ from runners.teacher_runner import run_teacher
 from runners.learner_runner import run_learner
 from modules.replicate_json_pose import Pose
 
-INTENTS = ["shut-down", "Default Welcome Intent", "generate_a_song", "create_music", "nao_learns", "nao_learning_completed", "user_wants_to_learn", "nao_conversation_repeat", "user_learns_dance", "nao_check_dance", "nao_dance_completed_check", "user_thanks", "nao_bye"]
+INTENTS = ["shut-down", "Default Welcome Intent", "generate_a_song", "nao_wants_to_learn", "nao_learns","nao_learning_completed", "user_wants_to_learn", "nao_conversation_repeat", "user_learns_dance", "nao_check_dance", "nao_dance_completed_check", "user_thanks", "nao_bye"]
 
 # MediaPipe-style body indices and connections for drawing skeletons.
 BODY_IDXS = list(range(11, 33))
@@ -319,7 +319,7 @@ class NaoTeachMode(SICApplication):
         if text:
             self.nao.tts.request(NaoqiTextToSpeechRequest(text))
 
-        if intent == "start_teaching":
+        if intent == "start_teaching": ## this should be fixed as the intent is non-existent 
             self.start_teaching_mode()
         elif intent == "generate_a_song":
             self.start_generating_song_mode()
