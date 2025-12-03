@@ -123,7 +123,7 @@ def instrumental_gen(style):
             style=f'{style}',
             title=f"{style}-instrumental",
             instrumental=True,
-            model='V4_5',
+            model='V5',
             callBackUrl='https://your-server.com/music-callback'
             )
         music_result = api.wait_for_completion(music_task_id)
@@ -184,7 +184,7 @@ class NaoSongGeneratorDemo(SICApplication):
         super(NaoSongGeneratorDemo, self).__init__()
         
         # Demo-specific initialization
-        self.nao_ip = "10.0.0.245"  # TODO: Replace with your NAO's IP address
+        self.nao_ip = "10.0.0.181"  # TODO: Replace with your NAO's IP address
         self.dialogflow_keyfile_path = abspath(join( "conf", "google", "google-key.json"))
         self.nao = None
         self.dialogflow_cx = None
@@ -274,30 +274,29 @@ class NaoSongGeneratorDemo(SICApplication):
     def stretching_routine(self):
         try:
             self.nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Let's stretch guys!"))
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Let's do some movements first to get the party started!"))
             self.nao.motion.request(
-                NaoqiAnimationRequest("animations/Stand/Gestures/Hey_1"), 
+                NaoqiAnimationRequest("animations/Stand/Gestures/Hey_6"), 
                 block=True
             )
             time.sleep(0.5)
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Clap your hands!"))
+            self.nao.tts.request(NaoqiTextToSpeechRequest("You! Get Moving!"))
             self.nao.motion.request(
-                NaoqiAnimationRequest("animations/Stand/Gestures/Clap_1"),
+                NaoqiAnimationRequest("animations/Stand/Gestures/You_1"),
                 block=True
             )
             time.sleep(0.5)
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Act as if you were explaining!"))
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Do some squads!"))
             self.nao.motion.request(
-                NaoqiAnimationRequest("animations/Stand/Gestures/Explain_1"),
+                NaoqiAnimationRequest("animations/Stand/Gestures/You_1"),
                 block=True
             )
             time.sleep(0.5)
-
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Let your body talk!"))
-            self.nao.motion.request(
-                NaoqiAnimationRequest("animations/Stand/BodyTalk/ScratchHead_1"),
-                block=True
-            )
+            self.nao.motion.request(NaoPostureRequest("Stand", 0.5))
+            self.nao.autonomous.request(NaoRestRequest())
+            self.nao.motion.request(NaoPostureRequest("Stand", 0.5))
+            self.nao.autonomous.request(NaoRestRequest())
+            self.nao.motion.request(NaoPostureRequest("Stand", 0.5))
             time.sleep(0.5)
             self.nao.tts.request(NaoqiTextToSpeechRequest("And bow to finish!"))
             self.nao.motion.request(
@@ -329,36 +328,37 @@ class NaoSongGeneratorDemo(SICApplication):
     def run(self):
         """Main loop"""
         try:
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Hello, I am Nao, lets make a song!!! Let me know which style you want!"))
+            self.nao.tts.request(NaoqiTextToSpeechRequest("You are right it would be more fun with a Song! I am NAO-DJ! Lets make a song!!! Let me know which style you want!"))
             self.logger.info(" -- Ready -- ")
             
-            while not self.shutdown_event.is_set():
-                self.logger.info(" ----- Your turn to talk!")
-                reply = self.dialogflow_cx.request(DetectIntentRequest(self.session_id))
-                if reply.transcript:
-                    self.logger.info("User said: {text}".format(text=reply.transcript))
-                    self.style = self.style_extractor(reply.transcript)
-                    if self.style ==None:
-                        self.style = "hip-hop"
-                    
-                elif not reply.transcript:
-                    self.logger.info("User said nothing")
-                    self.style = "hip-hop"
+            
                 
-                stretch_thread = threading.Thread(target = self.stretching_routine,daemon=True)
-                stretch_thread.start()
-                self.song = instrumental_gen(self.style)
-                self.downloaded = download_song(self.song)
-                audio = AudioSegment.from_wav(self.downloaded)
-                cut = audio[0:25_000]
-                cut.export(self.downloaded, format="wav")
-                self.wavefile = wave.open(self.downloaded, "rb")
-                self.samplerate = self.wavefile.getframerate()
-                self.logger.info("Passing audio to nao")
-                self.wavefile.rewind()
-                data = self.wavefile.readframes(self.wavefile.getnframes())
-                msg = AudioRequest(sample_rate=self.samplerate, waveform=bytes(data))
-                self.nao.speaker.request(msg)
+            self.logger.info(" ----- Your turn to talk!")
+            reply = self.dialogflow_cx.request(DetectIntentRequest(self.session_id))
+            if reply.transcript:
+                self.logger.info("User said: {text}".format(text=reply.transcript))
+                self.style = self.style_extractor(reply.transcript)
+                if self.style ==None:
+                    self.style = "hip-hop"
+                    
+            elif not reply.transcript:
+                self.logger.info("User said nothing")
+                self.style = "hip-hop"
+                
+            stretch_thread = threading.Thread(target = self.stretching_routine,daemon=True)
+            stretch_thread.start()
+            self.song = instrumental_gen(self.style)
+            self.downloaded = download_song(self.song)
+            audio = AudioSegment.from_wav(self.downloaded)
+            cut = audio[0:25_000]
+            cut.export(self.downloaded, format="wav")
+            self.wavefile = wave.open(self.downloaded, "rb")
+            self.samplerate = self.wavefile.getframerate()
+            self.logger.info("Passing audio to nao")
+            self.wavefile.rewind()
+            data = self.wavefile.readframes(self.wavefile.getnframes())
+            msg = AudioRequest(sample_rate=self.samplerate, waveform=bytes(data))
+            self.nao.speaker.request(msg)
                     
         except KeyboardInterrupt:
             self.logger.info("Demo interrupted by user")
