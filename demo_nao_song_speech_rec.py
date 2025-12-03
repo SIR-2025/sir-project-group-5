@@ -349,6 +349,9 @@ class NaoSongGeneratorDemo(SICApplication):
                 stretch_thread.start()
                 self.song = instrumental_gen(self.style)
                 self.downloaded = download_song(self.song)
+                audio = AudioSegment.from_wav(self.downloaded)
+                cut = audio[0:25_000]
+                cut.export(self.downloaded, format="wav")
                 self.wavefile = wave.open(self.downloaded, "rb")
                 self.samplerate = self.wavefile.getframerate()
                 self.logger.info("Passing audio to nao")
