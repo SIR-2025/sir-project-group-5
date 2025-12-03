@@ -162,7 +162,7 @@ def main():
     user_request = input("Describe the type of song you want: ")
     style = style_extractor(user_request)
     print(f"Extracted style: {style}")
-    audio = instrumental_gen(style)
+    audio = instrumental_gen(f"{style} - catchy dance, The maximal duration should be 20 seconds")
     print("Instrumental generated")
     wav_path = download_song(audio)
     print(f"Saved to: {wav_path}")
