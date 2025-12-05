@@ -119,7 +119,8 @@ def style_extractor(user_text: str, api_key: str = OPENAI_API_KEY) -> str:
     """Extract music style from free-form user input using OpenAI."""
     client = OpenAI(api_key=api_key)
     prompt = f"""You are a style extraction expert. From the user input, extract the
-music style the user wants the song to be in. Always append '20 seconds' at the end.
+music style the user wants the song to be in. Always append '20 seconds' at the end. 
+If you dont get any style then output: "Hip-Hop 20 seconds"
 
 Examples:
 User: Create a salsa song
@@ -127,6 +128,9 @@ Output: salsa 20 seconds
 
 User: Make a song in the style of hiphop
 Output: hip hop 20 seconds
+
+User: 
+Output: "Hip-Hop 20 seconds"
 
 User: {user_text}
 """
