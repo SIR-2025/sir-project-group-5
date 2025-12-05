@@ -222,7 +222,6 @@ def song_generation_with_exercise(
     log = logger.info if logger else print
 
     try:
-        # Intro
         nao.tts.request(
             NaoqiTextToSpeechRequest(
                 "You are right, it would be more fun with a song! "
@@ -231,7 +230,6 @@ def song_generation_with_exercise(
         )
         log("Song generation: asking user for style via Dialogflow.")
 
-        # Use the already-initialized Dialogflow CX and mic
         reply = dialogflow_cx.request(DetectIntentRequest(session_id))
 
         if getattr(reply, "transcript", None):
@@ -246,7 +244,7 @@ def song_generation_with_exercise(
 
         log(f"Using style string for Suno: {style}")
 
-        # Start stretching in parallel
+
         stretch_thread = threading.Thread(
             target=stretching_routine,
             args=(nao, logger),
@@ -267,7 +265,7 @@ def song_generation_with_exercise(
         play_audio(nao, wav_path, logger=logger)
 
         nao.tts.request(
-            NaoqiTextToSpeechRequest("I hope you liked My song!")
+            NaoqiTextToSpeechRequest("I hope you liked My song! Lets do some dancing now! Do you know any dance that would fit my song?")
         )
 
     except Exception as e:
