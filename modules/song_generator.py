@@ -189,7 +189,7 @@ def stretching_routine(nao, logger=None):
         nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "We are finished! Puh that was hard! Lets wait until we have enough energy to listen to the song!"
+                "...Lets wait until we have enough energy to listen to the song!"
             )
         )
 
@@ -223,8 +223,8 @@ def song_generation_with_exercise(
     try:
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "You are right, it would be more fun with a song! "
-                "I am Nao-DJ! Let me know which style you want!"
+                "Yes, it would be more fun with a song! "
+                "I am Nao-DJ after all! Choose your vibe! Should I create your song in pop, classical, hip-hop or a totally different style? "
             )
         )
         log("Song generation: asking user for style via Dialogflow.")
