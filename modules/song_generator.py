@@ -190,7 +190,7 @@ def stretching_routine(nao, logger=None):
         nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "We are finished! Puh that was hard! Now lets rest until we have enough energy for the song!"
+                "We are finished! Puh that was hard! Lets wait until we have enough energy to listen to the song!"
             )
         )
 
@@ -236,6 +236,8 @@ def song_generation_with_exercise(
             user_text = reply.transcript
             log(f"User said (style): {user_text}")
             style = style_extractor(user_text)
+            NaoqiTextToSpeechRequest(f"Got it! I will make a {style} song!")
+            
             if not style:
                 style = "hip hop 20 seconds"
         else:
@@ -265,7 +267,7 @@ def song_generation_with_exercise(
         play_audio(nao, wav_path, logger=logger)
 
         nao.tts.request(
-            NaoqiTextToSpeechRequest("Groooooveeeeyyy")
+            NaoqiTextToSpeechRequest("Groovey!")
         )
 
     except Exception as e:
