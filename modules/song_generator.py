@@ -87,7 +87,7 @@ def download_song(audio_meta: dict) -> str:
     title = audio_meta["title"]
 
     mp3_path = f"{title}.mp3"
-    wav_path = f"{title}.wav"
+    wav_path = f"music/song.wav"
 
     r = requests.get(audio_url)
     with open(mp3_path, "wb") as f:
@@ -119,15 +119,14 @@ def style_extractor(user_text: str, api_key: str = OPENAI_API_KEY) -> str:
     """Extract music style from free-form user input using OpenAI."""
     client = OpenAI(api_key=api_key)
     prompt = f"""You are a style extraction expert. From the user input, extract the
-music style the user wants the song to be in. Always append '20 seconds' at the end. 
-If you dont get any style then output: "Hip-Hop 20 seconds"
+music style the user wants the song to be in. Always append '30 seconds' at the end.
 
 Examples:
 User: Create a salsa song
-Output: salsa 20 seconds
+Output: salsa 30 seconds
 
 User: Make a song in the style of hiphop
-Output: hip hop 20 seconds
+Output: hip hop 30 seconds
 
 User: 
 Output: "Hip-Hop 20 seconds"
@@ -239,13 +238,15 @@ def song_generation_with_exercise(
             user_text = reply.transcript
             log(f"User said (style): {user_text}")
             style = style_extractor(user_text)
-            NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
+            nao.tts.request(
+                NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
+            )
             
             if not style:
-                style = "hip hop 20 seconds"
+                style = "hip hop 30 seconds"
         else:
-            log("No transcript from Dialogflow; defaulting to hip hop 20 seconds.")
-            style = "hip hop 20 seconds"
+            log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
+            style = "hip hop 30 seconds"
             NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
 
         log(f"Using style string for Suno: {style}")
@@ -265,7 +266,7 @@ def song_generation_with_exercise(
         log(f"Downloaded and converted song to WAV: {wav_path}")
 
         audio = AudioSegment.from_wav(wav_path)
-        cut = audio[0:25_000]
+        cut = audio[0:30_000]
         cut.export(wav_path, format="wav")
 
         play_audio(nao, wav_path, logger=logger)

@@ -27,6 +27,10 @@ from sic_framework import AudioRequest
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
+from sic_framework.devices.common_naoqi.naoqi_autonomous import (
+    NaoRestRequest,
+    NaoSetAutonomousLifeRequest,  # Changed to enable/disable autonomous life
+)
 from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
 
 from modules.replicate_json_pose import Pose, replicate_pose
@@ -222,28 +226,10 @@ def playback_poses(
     nao_ip: str,
     poses: List[Pose],
     logger=None,
-    sleep_between: float = 1.0,
+    sleep_between: float = 0.5,
     on_pose_start: Callable[[int], None] | None = None,
 ) -> None:
-    """Replay a sequence of poses on a NAO robot.
-
-    The camera is not used here; only NAO motions and LED feedback are used.
-
-    For each pose:
-        - Face LEDs are set to red.
-        - The pose is executed on NAO via `replicate_pose`.
-        - Face LEDs are set to green.
-        - The function sleeps `sleep_between` seconds.
-
-    Args:
-        nao: NAO device handle with `.leds` interface.
-        nao_ip: IP address of the NAO robot used by `replicate_pose`.
-        poses: List of `Pose` objects to execute in order.
-        logger: Logger-like object or None.
-        sleep_between: Pause in seconds between consecutive poses.
-        on_pose_start: Optional callback called as `on_pose_start(idx)` right
-            before pose `idx` is executed.
-    """
+    """Replay a sequence of poses on a NAO robot (assumes already in StandInit)."""
     if not poses:
         _log(logger, "No poses to playback.")
         return
@@ -254,9 +240,12 @@ def playback_poses(
         if on_pose_start is not None:
             on_pose_start(idx)
 
-        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))      # red
-        replicate_pose(pose, nao_ip, mirror=True, duration=2.0)
-        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))      # green
+        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
+        
+        # Never reset - flow smoothly from pose to pose
+        replicate_pose(pose, nao_ip, mirror=True, duration=2.5, reset_to_standinit=False)
+        
+        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
         time.sleep(sleep_between)
 
 def play_audio(nao, wav_path: str, logger=None):
@@ -324,8 +313,8 @@ def teach_sequence(
     time.sleep(0.5)
 
     poses = record_poses(
-        logger=logger,
         frame_provider=frame_provider,
+        logger=logger,
         out_dir=pose_dir,
         duration=18.0,
         sample_interval=3.0,
@@ -353,4 +342,5 @@ def teach_sequence(
         logger=logger,
         on_pose_start=on_pose_start,
     )
-    nao.autonomous.request(NaoRestRequest())
+    
+    # Note: breathing will be re-enabled in main.py after this function returns
