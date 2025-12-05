@@ -154,7 +154,7 @@ def stretching_routine(nao, logger=None):
         nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "Let's do some warm up movements first to get the party started!"
+                "Let's do some warm up movements first!"
             )
         )
         nao.motion.request(
