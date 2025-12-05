@@ -390,7 +390,7 @@ class NaoTeachMode(SICApplication):
         threading.Thread(target=_teacher_thread, daemon=True).start()
 
     def start_generating_song_mode(self):
-        """Start the jazz song generation routine in a background thread if not active."""
+        """Start the song generation routine in a background thread if not active."""
         with self._lock:
             if self.is_teaching or self.is_learning:
                 self.nao.tts.request(
@@ -400,7 +400,7 @@ class NaoTeachMode(SICApplication):
             self.is_learning = True  # mark busy (same as learning)
 
         def _song_thread():
-            """Worker thread that runs the jazz song generator pipeline."""
+            """Worker thread that runs the song generator pipeline."""
             try:
                 # Clear overlays; this mode does not need skeleton drawing
                 with self._overlay_lock:
@@ -421,7 +421,7 @@ class NaoTeachMode(SICApplication):
                 # Song done
                 self.nao.tts.request(
                     NaoqiTextToSpeechRequest(
-                        "Your jazz song is ready! I hope you enjoyed it!"
+                        "Your song is ready! I hope you enjoyed it!"
                     )
                 )
 
