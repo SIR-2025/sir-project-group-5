@@ -10,34 +10,30 @@ It is synchronous: it will return only after the song has been generated
 
 from __future__ import annotations
 
-from modules.song_generator import generate_jazz_song_with_squats
+from modules.song_generator import song_generation_with_exercise
 
 
-def run_jazz_song(
+def run_song(
     nao,
-    nao_ip: str,
+    dialogflow_cx,
+    session_id: int,
     logger=None,
     max_wait_time: float = 600.0,
+    nao_ip: str | None = None,   # kept only for API symmetry; not used
 ) -> None:
-    """Run the synchronous jazz song generation pipeline on a NAO robot.
+    """Run the synchronous song generation pipeline on a NAO robot.
 
-    This is a convenience wrapper around `generate_jazz_song_with_squats` that:
+    This is a convenience wrapper around `song_generation_with_exercise` that:
       - Forwards the NAO handle and optional logger.
-      - Waits for Suno to generate a jazz track.
-      - Lets NAO do "squats" while waiting.
+      - Asks the user for the desired genre via Dialogflow.
+      - Waits for Suno to generate a track.
+      - Lets NAO do "exercise" while waiting.
       - Plays the generated song once ready.
-
-    Args:
-        nao: NAO device handle with `.motion`, `.autonomous`, and `.speaker`.
-        nao_ip: IP address of the NAO robot (kept for API symmetry, not used).
-        logger: Optional logger-like object.
-        max_wait_time: Maximum time in seconds to wait for Suno's generation
-            before giving up.
     """
-    # Currently we don't need nao_ip in the generator, but we keep it in the
-    # signature so this runner matches the pattern of other runners.
-    _ = generate_jazz_song_with_squats(
+    _ = song_generation_with_exercise(
         nao=nao,
+        dialogflow_cx=dialogflow_cx,
+        session_id=session_id,
         logger=logger,
         max_wait_time=max_wait_time,
     )

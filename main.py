@@ -408,12 +408,15 @@ class NaoTeachMode(SICApplication):
                     self._learning_kp = None
                     self._learning_active = False
 
-                from runners.song_runner import run_jazz_song
-                run_jazz_song(
+                from runners.song_runner import run_song
+                run_song(
                     nao=self.nao,
-                    nao_ip=self.nao_ip,
+                    dialogflow_cx=self.dialogflow,
+                    session_id=int(np.random.randint(10000)),
                     logger=self.logger,
+                    nao_ip=self.nao_ip,          
                 )
+
 
                 # Song done
                 self.nao.tts.request(
