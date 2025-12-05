@@ -1,3 +1,4 @@
+opencv-python
 qi
 social-interaction-cloud[whisper,dialogflow]
 openai>=1.42.0
