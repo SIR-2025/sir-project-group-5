@@ -31,7 +31,10 @@ from sic_framework.devices import Nao
 from sic_framework.devices.nao import NaoqiTextToSpeechRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.core.message_python2 import CompressedImageMessage
-
+from sic_framework.devices.common_naoqi.naoqi_motion import (
+    NaoqiAnimationRequest,
+    NaoPostureRequest,
+)
 from sic_framework.services.dialogflow_cx.dialogflow_cx import (
     DialogflowCX,
     DialogflowCXConf,
@@ -40,6 +43,7 @@ from sic_framework.services.dialogflow_cx.dialogflow_cx import (
 
 from runners.teacher_runner import run_teacher
 from runners.learner_runner import run_learner
+from runners.song_runner import run_song
 from modules.replicate_json_pose import Pose
 
 INTENTS = ["shut-down", "Default Welcome Intent", "generate_a_song", "nao_wants_to_learn", "nao_learns","nao_learning_completed", "user_wants_to_learn", "nao_conversation_repeat", "user_learns_dance", "nao_check_dance", "nao_dance_completed_check", "user_thanks", "nao_bye"]
@@ -327,6 +331,11 @@ class NaoTeachMode(SICApplication):
             self.start_learning_mode()
         elif intent == "user_learns_dance":
             self.stop_teaching_mode()
+        elif intent == 'nao_bye':
+            self.nao.motion.request(
+            NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_3"),
+            block=True,
+        )
         else:
             self.logger.info(f"Intent '{intent}' not mapped to any behavior.")
 
@@ -408,7 +417,7 @@ class NaoTeachMode(SICApplication):
                     self._learning_kp = None
                     self._learning_active = False
 
-                from runners.song_runner import run_song
+                
                 run_song(
                     nao=self.nao,
                     dialogflow_cx=self.dialogflow,

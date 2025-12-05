@@ -158,30 +158,31 @@ def stretching_routine(nao, logger=None):
             )
         )
         nao.motion.request(
-            NaoqiAnimationRequest("animations/Stand/Gestures/Hey_6"),
+            NaoqiAnimationRequest("animations/Stand/Gestures/You_4"),
             block=True,
         )
         time.sleep(0.5)
-        nao.tts.request(NaoqiTextToSpeechRequest("You! Get Moving!"))
+        nao.tts.request(NaoqiTextToSpeechRequest("You, couch potato! Get Moving!"))
         nao.motion.request(
             NaoqiAnimationRequest("animations/Stand/Gestures/You_1"),
             block=True,
         )
         time.sleep(0.5)
-        nao.tts.request(NaoqiTextToSpeechRequest("Do some squats!"))
+        nao.tts.request(NaoqiTextToSpeechRequest("some squats!"))
         nao.motion.request(
             NaoqiAnimationRequest("animations/Stand/Gestures/You_1"),
             block=True,
         )
 
         #squats
+        nao.tts.request(NaoqiTextToSpeechRequest("Let's do three squats! Follow me."))
         for _ in range(3):
             nao.motion.request(NaoPostureRequest("Stand", 0.5))
             nao.autonomous.request(NaoRestRequest())
             time.sleep(0.5)
 
         nao.motion.request(NaoPostureRequest("Stand", 0.5))
-        nao.tts.request(NaoqiTextToSpeechRequest("And bow to finish!"))
+        nao.tts.request(NaoqiTextToSpeechRequest("And to end the routine properly... a bow of respect!"))
         nao.motion.request(
             NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_1"),
             block=True,
