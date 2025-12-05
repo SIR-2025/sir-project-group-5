@@ -223,7 +223,7 @@ def song_generation_with_exercise(
     try:
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "Yes, it would be more fun with a song! "
+                "Yes, it would be more fun with a song!"
                 "I am Nao-DJ after all! Choose your vibe! Should I create your song in pop, classical, hip-hop or a totally different style? "
             )
         )
@@ -267,7 +267,7 @@ def song_generation_with_exercise(
         play_audio(nao, wav_path, logger=logger)
 
         nao.tts.request(
-            NaoqiTextToSpeechRequest("Groovey!")
+            NaoqiTextToSpeechRequest("Nice tunes!")
         )
 
     except Exception as e:
