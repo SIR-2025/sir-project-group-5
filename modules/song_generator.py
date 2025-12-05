@@ -237,13 +237,14 @@ def song_generation_with_exercise(
             user_text = reply.transcript
             log(f"User said (style): {user_text}")
             style = style_extractor(user_text)
-            NaoqiTextToSpeechRequest(f"Got it! I will make a {style} song!")
+            NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
             
             if not style:
                 style = "hip hop 20 seconds"
         else:
             log("No transcript from Dialogflow; defaulting to hip hop 20 seconds.")
             style = "hip hop 20 seconds"
+            NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
 
         log(f"Using style string for Suno: {style}")
 
