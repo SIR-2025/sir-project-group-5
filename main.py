@@ -293,7 +293,7 @@ class NaoTeachMode(SICApplication):
         if message.response:
             rr = getattr(message.response, "recognition_result", None)
             if rr and getattr(rr, "is_final", False):
-                self.logger.info(f"User said: {rr.transcript}")
+                self.logger.info(f"[{self.last_intent}] User said: {rr.transcript}")
 
     # ----------------------------------------------------------
     # Dialogflow intent polling loop (runs in background thread)
@@ -317,27 +317,10 @@ class NaoTeachMode(SICApplication):
         intent = getattr(reply, "intent", "") or ""
         text = getattr(reply, "fulfillment_message", "") or ""
 
-        self.logger.info(f"[{self.last_intent}] Detected intent from DF: {repr(intent)}")
         self.logger.info(f"Fulfillment message: {repr(text)}")
 
         if text:
             self.nao.tts.request(NaoqiTextToSpeechRequest(text))
-
-        if intent == "start_teaching": ## this should be fixed as the intent is non-existent 
-            self.start_teaching_mode()
-        elif intent == "generate_a_song":
-            self.start_generating_song_mode()
-        elif intent == "nao_wants_to_learn":
-            self.start_learning_mode()
-        elif intent == "user_learns_dance":
-            self.stop_teaching_mode()
-        elif intent == 'nao_bye':
-            self.nao.motion.request(
-            NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_3"),
-            block=True,
-        )
-        else:
-            self.logger.info(f"Intent '{intent}' not mapped to any behavior.")
 
         match intent:
             case "generate_a_song":
@@ -346,6 +329,11 @@ class NaoTeachMode(SICApplication):
                 self.start_teaching_mode()
             case "user_learns_dance":
                 self.start_learning_mode()
+            case 'nao_bye':
+                self.nao.motion.request(
+                    NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_3"),
+                    block=True,
+                )
             case _:
                 self.logger.info(f"Intent '{intent}' not mapped to any behavior.")
 
@@ -417,11 +405,11 @@ class NaoTeachMode(SICApplication):
                     self._learning_kp = None
                     self._learning_active = False
 
-                
+
                 run_song(
                     nao=self.nao,
                     dialogflow_cx=self.dialogflow,
-                    session_id=int(np.random.randint(10000)),
+                    session_id=int(self.session_id),
                     logger=self.logger,
                     nao_ip=self.nao_ip,          
                 )
@@ -464,12 +452,6 @@ class NaoTeachMode(SICApplication):
             with self._lock:
                 self.is_learning = False
             return
-
-        self.nao.tts.request(
-            NaoqiTextToSpeechRequest(
-                "Great, let's practice the dance you taught me!"
-            )
-        )
 
         def _learner_thread():
             """Worker thread that runs the learner pipeline and updates overlays."""

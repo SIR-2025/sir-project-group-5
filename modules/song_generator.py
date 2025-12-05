@@ -1,5 +1,3 @@
-# modules/song_generation.py
-
 import os
 import time
 import wave

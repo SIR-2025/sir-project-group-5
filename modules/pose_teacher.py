@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+import wave
 from datetime import datetime
 from typing import Callable, List, Optional, Dict
 
 import cv2
 import mediapipe as mp
 import numpy as np
+from sic_framework import AudioRequest
 
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
@@ -256,6 +259,17 @@ def playback_poses(
         nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))      # green
         time.sleep(sleep_between)
 
+def play_audio(nao, wav_path: str, logger=None):
+    """Play a WAV file through NAO's speaker."""
+    log = logger.info if logger else print
+    log(f"Playing WAV on NAO: {wav_path}")
+
+    wf = wave.open(wav_path, "rb")
+    samplerate = wf.getframerate()
+    wf.rewind()
+    data = wf.readframes(wf.getnframes())
+    msg = AudioRequest(sample_rate=samplerate, waveform=bytes(data))
+    nao.speaker.request(msg)
 
 def teach_sequence(
     nao,
@@ -300,12 +314,21 @@ def teach_sequence(
     # Eyes blue – ready to record
     nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 0, 1, 0))
 
+    song_path = "music/song.wav"
+    song_thread = threading.Thread(
+        target=play_audio,
+        args=(nao, song_path, logger),
+        daemon=True,
+    )
+    song_thread.start()
+    time.sleep(0.5)
+
     poses = record_poses(
         logger=logger,
         frame_provider=frame_provider,
         out_dir=pose_dir,
-        duration=12.0,
-        sample_interval=2.0,
+        duration=18.0,
+        sample_interval=3.0,
         countdown=3,
         on_pose_saved=on_pose_saved,
         on_kp_frame=on_kp_frame,

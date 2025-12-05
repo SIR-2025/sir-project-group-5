@@ -16,12 +16,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+import wave
 from typing import Callable, List
 
 import cv2
 import mediapipe as mp
 import numpy as np
+from sic_framework import AudioRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
@@ -205,6 +208,17 @@ def wait_for_imitation(
 
             time.sleep(0.01)
 
+def play_audio(nao, wav_path: str, logger=None):
+    """Play a WAV file through NAO's speaker."""
+    log = logger.info if logger else print
+    log(f"Playing WAV on NAO: {wav_path}")
+
+    wf = wave.open(wav_path, "rb")
+    samplerate = wf.getframerate()
+    wf.rewind()
+    data = wf.readframes(wf.getnframes())
+    msg = AudioRequest(sample_rate=samplerate, waveform=bytes(data))
+    nao.speaker.request(msg)
 
 def learn_sequence(
     nao,
@@ -292,6 +306,15 @@ def learn_sequence(
         nao.tts.request(
             NaoqiTextToSpeechRequest("Okay that was the lesson, can you show me now if you remember all the steps")
         )
+
+        song_path = "music/song.wav"
+        song_thread = threading.Thread(
+            target=play_audio,
+            args=(nao, song_path, logger),
+            daemon=True,
+        )
+        song_thread.start()
+        time.sleep(0.5)
 
     finally:
         _log(logger, "Learning sequence finished. Going to rest.")
