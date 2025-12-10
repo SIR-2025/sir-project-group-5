@@ -31,6 +31,7 @@ def run_learner(
     on_pose_demo_start: Callable[[int], None] | None = None,
     on_pose_learned: Callable[[int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None, float, int], None] | None = None,
+    on_pose_start: Callable[[int], None] | None = None,
 ) -> None:
     """Run the synchronous learner pipeline on a NAO robot.
 
@@ -78,4 +79,5 @@ def run_learner(
         on_pose_demo_start=on_pose_demo_start,
         on_pose_learned=on_pose_learned,
         on_kp_frame=on_kp_frame,
+        on_pose_start=on_pose_start,
     )

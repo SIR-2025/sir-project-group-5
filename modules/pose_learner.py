@@ -30,6 +30,7 @@ from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
 from sic_framework.devices.common_naoqi.naoqi_text_to_speech import NaoqiTextToSpeechRequest
 
+from modules.pose_teacher import playback_poses
 from modules.replicate_json_pose import Pose, replicate_pose
 
 mp_pose = mp.solutions.pose
@@ -233,6 +234,7 @@ def learn_sequence(
     on_pose_demo_start: Callable[[int], None] | None = None,
     on_pose_learned: Callable[[int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None, float, int], None] | None = None,
+    on_pose_start: Callable[[int], None] | None = None,
 ) -> None:
     """Run the 'learning' routine: NAO demonstrates, human imitates.
 
@@ -243,7 +245,7 @@ def learn_sequence(
         3. If imitation is successful, NAO confirms and moves on.
            If timeout occurs, NAO gives up on that pose and still moves on.
 
-    LED convention (you can tweak these if you want):
+    LED convention:
         - Blue: NAO is demonstrating a pose.
         - Yellow: Waiting for imitation.
         - Green: Imitation successful.
@@ -258,64 +260,67 @@ def learn_sequence(
     nao.motion.request(NaoPostureRequest("Stand", 0.5))
     time.sleep(1.0)
 
-    try:
-        for idx, pose in enumerate(poses):
-            _log(logger, f"Pose {idx+1}/{len(poses)} – demonstration phase.")
+    for idx, pose in enumerate(poses):
+        _log(logger, f"Pose {idx+1}/{len(poses)} – demonstration phase.")
 
-            if on_pose_demo_start is not None:
-                on_pose_demo_start(idx)
+        if on_pose_demo_start is not None:
+            on_pose_demo_start(idx)
 
-            # Eyes blue – demonstrating
-            nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 0, 1, 0))
+        # Eyes purple – demonstrating
+        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 1, 0))
 
-            # NAO demonstrates the pose (this moves into pose A)
-            replicate_pose(pose, nao_ip, mirror=True, duration=demo_duration)
-            time.sleep(0.5)
-
-            # Eyes yellow – waiting for imitation (stay in pose A)
-            nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 1, 0, 0))
-
-            def _wrapped_on_kp_frame(kp, dist):
-                if on_kp_frame is not None:
-                    on_kp_frame(kp, dist, idx)
-
-            success = wait_for_imitation(
-                target_pose=pose,
-                frame_provider=frame_provider,
-                logger=logger,
-                max_wait=wait_max,            # <-- wait up to 15s
-                match_threshold=match_threshold,
-                stable_frames=stable_frames,
-                on_kp_frame=_wrapped_on_kp_frame,
-            )
-
-            if success:
-                # Eyes green – success
-                nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
-                _log(logger, f"Pose {idx+1} learned successfully.")
-                if on_pose_learned is not None:
-                    on_pose_learned(idx)
-            else:
-                # Eyes red – failed / timeout
-                nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
-                _log(logger, f"Pose {idx+1} imitation failed or timed out.")
-
-            # Small pause between poses
-            time.sleep(1.0)
-
-        nao.tts.request(
-            NaoqiTextToSpeechRequest("Okay that was the lesson, can you show me now if you remember all the steps")
-        )
-
-        song_path = "music/song.wav"
-        song_thread = threading.Thread(
-            target=play_audio,
-            args=(nao, song_path, logger),
-            daemon=True,
-        )
-        song_thread.start()
+        # NAO demonstrates the pose (this moves into pose A)
+        replicate_pose(pose, nao_ip, mirror=True, duration=demo_duration)
         time.sleep(0.5)
 
-    finally:
-        _log(logger, "Learning sequence finished. Going to rest.")
-        nao.autonomous.request(NaoRestRequest())
+        # Eyes yellow – waiting for imitation (stay in pose A)
+        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 1, 0, 0))
+
+        def _wrapped_on_kp_frame(kp, dist):
+            if on_kp_frame is not None:
+                on_kp_frame(kp, dist, idx)
+
+        success = wait_for_imitation(
+            target_pose=pose,
+            frame_provider=frame_provider,
+            logger=logger,
+            max_wait=wait_max,            # <-- wait up to 15s
+            match_threshold=match_threshold,
+            stable_frames=stable_frames,
+            on_kp_frame=_wrapped_on_kp_frame,
+        )
+
+        if success:
+            # Eyes green – success
+            nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
+            _log(logger, f"Pose {idx+1} learned successfully.")
+            if on_pose_learned is not None:
+                on_pose_learned(idx)
+        else:
+            # Eyes red – failed / timeout
+            nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
+            _log(logger, f"Pose {idx+1} imitation failed or timed out.")
+
+        # Small pause between poses
+        time.sleep(1.0)
+
+    nao.tts.request(
+        NaoqiTextToSpeechRequest("Okay that was the lesson, can you show me now if you remember all the steps")
+    )
+
+    song_path = "music/song.wav"
+    song_thread = threading.Thread(
+        target=play_audio,
+        args=(nao, song_path, logger),
+        daemon=True,
+    )
+    song_thread.start()
+    time.sleep(0.5)
+
+    playback_poses(
+        nao=nao,
+        nao_ip=nao_ip,
+        poses=poses,
+        logger=logger,
+        on_pose_start=on_pose_start,
+    )

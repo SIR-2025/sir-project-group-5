@@ -239,7 +239,7 @@ def song_generation_with_exercise(
             log(f"User said (style): {user_text}")
             style = style_extractor(user_text)
             nao.tts.request(
-                NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
+                NaoqiTextToSpeechRequest(f"Got it! You said {style.split("30 seconds")[0]} !")
             )
             
             if not style:

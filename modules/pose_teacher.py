@@ -240,12 +240,9 @@ def playback_poses(
         if on_pose_start is not None:
             on_pose_start(idx)
 
-        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
-        
         # Never reset - flow smoothly from pose to pose
         replicate_pose(pose, nao_ip, mirror=True, duration=2.5, reset_to_standinit=False)
         
-        nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
         time.sleep(sleep_between)
 
 def play_audio(nao, wav_path: str, logger=None):
@@ -342,5 +339,3 @@ def teach_sequence(
         logger=logger,
         on_pose_start=on_pose_start,
     )
-    
-    # Note: breathing will be re-enabled in main.py after this function returns
