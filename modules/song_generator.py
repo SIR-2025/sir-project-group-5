@@ -72,7 +72,7 @@ def instrumental_gen(style: str, max_wait_time: float = 600.0) -> dict:
         prompt=f"Create a {style} song",
         customMode=True,
         style=style,
-        title=f"{style}-instrumental",
+        title=f"{style}-instrumental - 30 seconds",
         instrumental=True,
         model="V5",
         callBackUrl="https://your-server.com/music-callback",
@@ -123,13 +123,13 @@ music style the user wants the song to be in. Always append '30 seconds' at the 
 
 Examples:
 User: Create a salsa song
-Output: salsa 30 seconds
+Output: salsa 
 
 User: Make a song in the style of hiphop
-Output: hip hop 30 seconds
+Output: hip hop 
 
 User: 
-Output: "Hip-Hop 20 seconds"
+Output: "Hip-Hop"
 
 User: {user_text}
 """
@@ -243,10 +243,10 @@ def song_generation_with_exercise(
             )
             
             if not style:
-                style = "hip hop 30 seconds"
+                style = "hip hop"
         else:
             log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
-            style = "hip hop 30 seconds"
+            style = "hip hop"
             NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
 
         log(f"Using style string for Suno: {style}")
