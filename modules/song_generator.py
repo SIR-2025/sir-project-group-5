@@ -16,6 +16,7 @@ from sic_framework.devices.common_naoqi.naoqi_motion import (
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.core.message_python2 import AudioRequest
 from sic_framework.services.dialogflow_cx.dialogflow_cx import DetectIntentRequest
+import asyncio
 
 
 
@@ -56,7 +57,7 @@ class SunoAPI:
             time.sleep(30)
         raise Exception("Generation timeout")
 
-    def get_task_status(self, task_id: str) -> dict:
+    def get_task_status(self, task_id: str):
         resp = requests.get(
             f"{self.base_url}/generate/record-info?taskId={task_id}",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -65,7 +66,7 @@ class SunoAPI:
 
 
 
-def instrumental_gen(style: str, max_wait_time: float = 600.0) -> dict:
+def instrumental_gen(style: str, max_wait_time: float = 600.0):
     """Generate an instrumental track in the given style using Suno."""
     api = SunoAPI(api_key=SUNO_API_KEY)
     task_id = api.generate_music(
@@ -119,7 +120,7 @@ def style_extractor(user_text: str, api_key: str = OPENAI_API_KEY) -> str:
     """Extract music style from free-form user input using OpenAI."""
     client = OpenAI(api_key=api_key)
     prompt = f"""You are a style extraction expert. From the user input, extract the
-music style the user wants the song to be in. Always append '30 seconds' at the end.
+music style the user wants the song to be in. 
 
 Examples:
 User: Create a salsa song
@@ -139,7 +140,7 @@ User: {user_text}
         messages=[
             {
                 "role": "system",
-                "content": "You output only the style and duration, nothing else.",
+                "content": "You output only the style, nothing else.",
             },
             {"role": "user", "content": prompt},
         ],
@@ -147,7 +148,31 @@ User: {user_text}
     )
     return resp.choices[0].message.content.strip()
 
-
+async def transcript_with_timeout(dialogflow_cx, session_id: int, timeout = 30.0):
+    try:
+        return await asyncio.wait_for(
+            dialogflow_cx.request(DetectIntentRequest(session_id)),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        return None
+    
+def threading_for_transcript(dialogflow_cx, session_id: int, timeout = 30.0):
+    result = {'reply': None,"error": None}
+    def worker():
+        try:
+            
+            result['reply'] = asyncio.run(transcript_with_timeout(dialogflow_cx, session_id, timeout=timeout))
+        except Exception as e:
+            result['error'] = e
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start() 
+    thread.join(timeout+1.0)
+    if thread.is_alive():
+        return None
+    if result['error']:
+        raise result['error']
+    return result['reply']
 
 def stretching_routine(nao, logger=None):
     log = logger.info if logger else print
@@ -231,23 +256,26 @@ def song_generation_with_exercise(
             )
         )
         log("Song generation: asking user for style via Dialogflow.")
-
-        reply = dialogflow_cx.request(DetectIntentRequest(session_id))
+        reply = threading_for_transcript(dialogflow_cx, session_id, timeout=10.0)
+       
 
         if getattr(reply, "transcript", None):
             user_text = reply.transcript
             log(f"User said (style): {user_text}")
             style = style_extractor(user_text)
-            nao.tts.request(
-                NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
-            )
+            
             
             if not style:
                 style = "hip hop"
+            else:
+                nao.tts.request(
+                NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
+            )
         else:
             log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
             style = "hip hop"
-            NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
+            nao.tts.request(
+            NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop"))
 
         log(f"Using style string for Suno: {style}")
 
