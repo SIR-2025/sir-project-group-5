@@ -34,6 +34,7 @@ from sic_framework.devices.common_naoqi.naoqi_text_to_speech import (
     NaoqiTextToSpeechRequest,
 )
 
+from modules.pose_teacher import playback_poses
 from modules.replicate_json_pose import Pose, replicate_pose
 
 mp_pose = mp.solutions.pose
@@ -232,6 +233,7 @@ def learn_sequence(
     on_pose_demo_start: Callable[[int], None] | None = None,
     on_pose_learned: Callable[[int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None, float, int | None], None] | None = None,
+    on_pose_start: Callable[[int], None] | None = None,
 ) -> None:
     """
     NAO demonstrates each pose, human imitates.
@@ -301,12 +303,18 @@ def learn_sequence(
 
         song_thread = threading.Thread(
             target=play_audio,
-            args=(nao, "music/song.wav", logger),
+            args=(nao, "music/backup.wav", logger),
             daemon=True,
         )
         song_thread.start()
-        time.sleep(0.5)
+
+        playback_poses(
+            nao=nao,
+            nao_ip=nao_ip,
+            poses=poses,
+            logger=logger,
+            on_pose_start=on_pose_start,
+        )
 
     finally:
-        _log(logger, "Learning sequence finished. Going to rest.")
-        nao.autonomous.request(NaoRestRequest())
+        pass

@@ -71,7 +71,7 @@ def instrumental_gen(style: str, max_wait_time: float = 600.0) -> dict:
     task_id = api.generate_music(
         prompt=f"Create a {style} song",
         customMode=True,
-        style=style,
+        style=f"{style} 40 seconds",
         title=f"{style}-instrumental",
         instrumental=True,
         model="V5",
@@ -119,17 +119,17 @@ def style_extractor(user_text: str, api_key: str = OPENAI_API_KEY) -> str:
     """Extract music style from free-form user input using OpenAI."""
     client = OpenAI(api_key=api_key)
     prompt = f"""You are a style extraction expert. From the user input, extract the
-music style the user wants the song to be in. Always append '30 seconds' at the end.
+music style the user wants the song to be in.
 
 Examples:
 User: Create a salsa song
-Output: salsa 30 seconds
+Output: salsa
 
 User: Make a song in the style of hiphop
-Output: hip hop 30 seconds
+Output: hip hop
 
 User: 
-Output: "Hip-Hop 20 seconds"
+Output: "Hip-Hop"
 
 User: {user_text}
 """
@@ -192,7 +192,7 @@ def stretching_routine(nao, logger=None):
         nao.motion.request(NaoPostureRequest("StandInit", 0.5), block=True)
         nao.tts.request(
             NaoqiTextToSpeechRequest(
-                "...Lets wait until we have enough energy to listen to the song!"
+                "...Let me find the right tunes! This might take a while. But trust me... it will be worth it!"
             )
         )
 
@@ -202,10 +202,6 @@ def stretching_routine(nao, logger=None):
             nao.autonomous.request(NaoRestRequest())
         except Exception:
             pass
-
-
-
-
 
 def song_generation_with_exercise(
     nao,
@@ -242,10 +238,10 @@ def song_generation_with_exercise(
         )
 
         if not style:
-            style = "hip hop 30 seconds"
+            style = "hip hop"
     else:
         log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
-        style = "hip hop 30 seconds"
+        style = "hip hop"
         NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
 
     log(f"Using style string for Suno: {style}")
@@ -265,7 +261,7 @@ def song_generation_with_exercise(
     log(f"Downloaded and converted song to WAV: {wav_path}")
 
     audio = AudioSegment.from_wav(wav_path)
-    cut = audio[0:30_000]
+    cut = audio[0:40_000]
     cut.export(wav_path, format="wav")
 
     play_audio(nao, wav_path, logger=logger)

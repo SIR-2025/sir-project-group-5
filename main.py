@@ -168,6 +168,7 @@ class NaoTeachMode(SICApplication):
             location=location,
             sample_rate_hertz=16000,
             language="en",
+            timeout=None,
         )
 
         self.dialogflow = DialogflowCX(conf=conf_df, input_source=self.nao.mic)
@@ -177,34 +178,6 @@ class NaoTeachMode(SICApplication):
             "Setup complete. Say 'start teaching' to record a dance, "
             "or 'start learning' to practice the dance together."
         )
-
-    # ----------------------------------------------------------
-    # TTS with microphone muting
-    # ----------------------------------------------------------
-    def safe_say(self, text: str, block: bool = True):
-        """Speak while pausing Dialogflow so NAO won't hear/recognise its own speech."""
-        with self._tts_lock:
-            try:
-                # Pause Dialogflow processing
-                self._df_stop.set()
-                time.sleep(0.05)
-
-                # Send TTS request
-                self.nao.tts.request(NaoqiTextToSpeechRequest(text))
-
-                if block:
-                    # crude duration estimate
-                    words = len(text.split())
-                    estimated_duration = max(1.0, (words / 150.0) * 60.0)
-                    time.sleep(estimated_duration)
-                else:
-                    time.sleep(0.5)
-            except Exception:
-                self.logger.exception("Error during safe_say")
-            finally:
-                # Resume Dialogflow processing
-                time.sleep(0.05)
-                self._df_stop.clear()
 
     # ----------------------------------------------------------
     # Camera handling
@@ -237,7 +210,7 @@ class NaoTeachMode(SICApplication):
     def _on_pose_learned(self, idx: int) -> None:
         """Optional callback when a pose is successfully imitated."""
         try:
-            self.safe_say(f"Nice! You matched pose number {idx + 1}.")
+            self.nao.tts.request(NaoqiTextToSpeechRequest(f"Nice! You matched pose number {idx + 1}."))
         except Exception:
             self.logger.exception("Error while giving TTS feedback on pose learned")
 
@@ -382,7 +355,7 @@ class NaoTeachMode(SICApplication):
         self.logger.info(f"Fulfillment message: {repr(text)}")
 
         if text:
-            self.safe_say(text)
+            self.nao.tts.request(NaoqiTextToSpeechRequest(text))
 
         match intent:
             case "generate_a_song":
@@ -523,6 +496,7 @@ class NaoTeachMode(SICApplication):
                     on_pose_demo_start=self._on_pose_start,
                     on_pose_learned=self._on_pose_learned,
                     on_kp_frame=_learner_on_kp_frame,
+                    on_pose_start=self._on_pose_start,
                 )
             finally:
                 with self._overlay_lock:
@@ -591,7 +565,7 @@ class NaoTeachMode(SICApplication):
         self._df_thread.start()
 
         try:
-            self.safe_say("Hello")
+            self.nao.tts.request(NaoqiTextToSpeechRequest("Hoi!"))
 
             while not self.shutdown_event.is_set() and not self._should_exit.is_set():
                 frame = self.get_latest_frame()

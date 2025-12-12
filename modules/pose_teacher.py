@@ -303,7 +303,7 @@ def teach_sequence(
     # Eyes blue – ready to record
     nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 0, 1, 0))
 
-    song_path = "music/song.wav"
+    song_path = "music/backup.wav"
     song_thread = threading.Thread(
         target=play_audio,
         args=(nao, song_path, logger),
@@ -342,5 +342,3 @@ def teach_sequence(
         logger=logger,
         on_pose_start=on_pose_start,
     )
-    
-    # Note: breathing will be re-enabled in main.py after this function returns

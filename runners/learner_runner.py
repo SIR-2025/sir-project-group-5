@@ -31,6 +31,7 @@ def run_learner(
     on_pose_demo_start: Callable[[int], None] | None = None,
     on_pose_learned: Callable[[int], None] | None = None,
     on_kp_frame: Callable[[np.ndarray | None, float, int], None] | None = None,
+    on_pose_start: Callable[[np.ndarray | None, float, int], None] | None = None,
 ) -> None:
     """Run the synchronous learner pipeline on a NAO robot.
 
@@ -49,6 +50,7 @@ def run_learner(
         on_pose_demo_start: Optional callback `on_pose_demo_start(idx)`.
         on_pose_learned: Optional callback `on_pose_learned(idx)`.
         on_kp_frame: Optional callback `on_kp_frame(kp, dist, idx)`.
+        on_pose_start: Optional callback `on_pose_start(idx)`.
     """
     if poses is None or len(poses) == 0:
         pose_dir = os.path.abspath(
@@ -78,4 +80,5 @@ def run_learner(
         on_pose_demo_start=on_pose_demo_start,
         on_pose_learned=on_pose_learned,
         on_kp_frame=on_kp_frame,
+        on_pose_start=on_pose_start
     )
