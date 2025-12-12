@@ -176,7 +176,7 @@ def stretching_routine(nao, logger=None):
         )
 
         #squats
-        nao.tts.request(NaoqiTextToSpeechRequest("Let's do three squats! Follow me."))
+        nao.tts.request(NaoqiTextToSpeechRequest("Let's warm up the joints with some squats!"))
         for _ in range(3):
             nao.motion.request(NaoPostureRequest("Stand", 0.5))
             nao.autonomous.request(NaoRestRequest())
@@ -261,6 +261,11 @@ def song_generation_with_exercise(
     log(f"Downloaded and converted song to WAV: {wav_path}")
 
     audio = AudioSegment.from_wav(wav_path)
+    audio = audio[: min(len(audio), 40_000)]
+
+    audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+    audio.export(wav_path, format="wav")
+    print("Final duration (s):", len(audio) / 1000)
     cut = audio[0:40_000]
     cut.export(wav_path, format="wav")
 

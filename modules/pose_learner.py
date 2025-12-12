@@ -303,7 +303,7 @@ def learn_sequence(
 
         song_thread = threading.Thread(
             target=play_audio,
-            args=(nao, "music/backup.wav", logger),
+            args=(nao, "music/song.wav", logger),
             daemon=True,
         )
         song_thread.start()
