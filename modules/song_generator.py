@@ -2,6 +2,7 @@ import os
 import time
 import wave
 import threading
+
 import requests
 from dotenv import load_dotenv
 from pydub import AudioSegment
@@ -15,7 +16,6 @@ from sic_framework.devices.common_naoqi.naoqi_motion import (
 from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.core.message_python2 import AudioRequest
 from sic_framework.services.dialogflow_cx.dialogflow_cx import DetectIntentRequest
-import asyncio
 
 
 
@@ -56,7 +56,7 @@ class SunoAPI:
             time.sleep(30)
         raise Exception("Generation timeout")
 
-    def get_task_status(self, task_id: str):
+    def get_task_status(self, task_id: str) -> dict:
         resp = requests.get(
             f"{self.base_url}/generate/record-info?taskId={task_id}",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -65,14 +65,14 @@ class SunoAPI:
 
 
 
-def instrumental_gen(style: str, max_wait_time: float = 600.0):
+def instrumental_gen(style: str, max_wait_time: float = 600.0) -> dict:
     """Generate an instrumental track in the given style using Suno."""
     api = SunoAPI(api_key=SUNO_API_KEY)
     task_id = api.generate_music(
         prompt=f"Create a {style} song",
         customMode=True,
         style=style,
-        title=f"{style}-instrumental - 30 seconds",
+        title=f"{style}-instrumental",
         instrumental=True,
         model="V5",
         callBackUrl="https://your-server.com/music-callback",
@@ -119,17 +119,17 @@ def style_extractor(user_text: str, api_key: str = OPENAI_API_KEY) -> str:
     """Extract music style from free-form user input using OpenAI."""
     client = OpenAI(api_key=api_key)
     prompt = f"""You are a style extraction expert. From the user input, extract the
-music style the user wants the song to be in. 
+music style the user wants the song to be in. Always append '30 seconds' at the end.
 
 Examples:
 User: Create a salsa song
-Output: salsa 
+Output: salsa 30 seconds
 
 User: Make a song in the style of hiphop
-Output: hip hop 
+Output: hip hop 30 seconds
 
 User: 
-Output: "Hip-Hop"
+Output: "Hip-Hop 20 seconds"
 
 User: {user_text}
 """
@@ -139,7 +139,7 @@ User: {user_text}
         messages=[
             {
                 "role": "system",
-                "content": "You output only the style, nothing else.",
+                "content": "You output only the style and duration, nothing else.",
             },
             {"role": "user", "content": prompt},
         ],
@@ -147,15 +147,7 @@ User: {user_text}
     )
     return resp.choices[0].message.content.strip()
 
-async def transcript_with_timeout(dialogflow_cx, session_id: int, timeout = 30.0):
-    try:
-        return await asyncio.wait_for(
-            dialogflow_cx.request(DetectIntentRequest(session_id)),
-            timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        return None
-    
+
 
 def stretching_routine(nao, logger=None):
     log = logger.info if logger else print
@@ -215,7 +207,7 @@ def stretching_routine(nao, logger=None):
 
 
 
-async def song_generation_with_exercise(
+def song_generation_with_exercise(
     nao,
     dialogflow_cx,
     session_id: int,
@@ -231,64 +223,53 @@ async def song_generation_with_exercise(
     """
     log = logger.info if logger else print
 
-    try:
+    nao.tts.request(
+        NaoqiTextToSpeechRequest(
+            "Yes, it would be more fun with a song!"
+            "I am Nao-DJ after all! Choose your vibe! Should I create your song in pop, classical, hip-hop or a totally different style? "
+        )
+    )
+    log("Song generation: asking user for style via Dialogflow.")
+
+    reply = dialogflow_cx.request(DetectIntentRequest(session_id))
+
+    if getattr(reply, "transcript", None):
+        user_text = reply.transcript
+        log(f"User said (style): {user_text}")
+        style = style_extractor(user_text)
         nao.tts.request(
-            NaoqiTextToSpeechRequest(
-                "Yes, it would be more fun with a song!"
-                "I am Nao-DJ after all! Choose your vibe! Should I create your song in pop, classical, hip-hop or a totally different style? "
-            )
-        )
-        log("Song generation: asking user for style via Dialogflow.")
-        reply = await transcript_with_timeout(dialogflow_cx, session_id, timeout=10.0)
-       
-
-        if getattr(reply, "transcript", None):
-            user_text = reply.transcript
-            log(f"User said (style): {user_text}")
-            style = style_extractor(user_text)
-            
-            
-            if not style:
-                style = "hip hop"
-            else:
-                nao.tts.request(
-                NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
-            )
-        else:
-            log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
-            style = "hip hop"
-            nao.tts.request(
-            NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop"))
-
-        log(f"Using style string for Suno: {style}")
-
-
-        stretch_thread = threading.Thread(
-            target=stretching_routine,
-            args=(nao, logger),
-            daemon=True,
-        )
-        stretch_thread.start()
-
-        song_meta = instrumental_gen(style, max_wait_time=max_wait_time)
-        log(f"Suno song meta received: {song_meta.get('title', 'unknown title')}")
-
-        wav_path = download_song(song_meta)
-        log(f"Downloaded and converted song to WAV: {wav_path}")
-
-        audio = AudioSegment.from_wav(wav_path)
-        cut = audio[0:30_000]
-        cut.export(wav_path, format="wav")
-
-        play_audio(nao, wav_path, logger=logger)
-
-        nao.tts.request(
-            NaoqiTextToSpeechRequest("Nice tunes!")
+            NaoqiTextToSpeechRequest(f"Got it! You said {style} !")
         )
 
-    except Exception as e:
-        log(f"Exception in song_generation_with_exercise: {e}")
-        try:
-            nao.autonomous.request(NaoRestRequest())
-        except Exception:
-            pass
+        if not style:
+            style = "hip hop 30 seconds"
+    else:
+        log("No transcript from Dialogflow; defaulting to hip hop 23 seconds.")
+        style = "hip hop 30 seconds"
+        NaoqiTextToSpeechRequest(f"I did not understand any style lets listen to some hip hop")
+
+    log(f"Using style string for Suno: {style}")
+
+
+    stretch_thread = threading.Thread(
+        target=stretching_routine,
+        args=(nao, logger),
+        daemon=True,
+    )
+    stretch_thread.start()
+
+    song_meta = instrumental_gen(style, max_wait_time=max_wait_time)
+    log(f"Suno song meta received: {song_meta.get('title', 'unknown title')}")
+
+    wav_path = download_song(song_meta)
+    log(f"Downloaded and converted song to WAV: {wav_path}")
+
+    audio = AudioSegment.from_wav(wav_path)
+    cut = audio[0:30_000]
+    cut.export(wav_path, format="wav")
+
+    play_audio(nao, wav_path, logger=logger)
+
+    nao.tts.request(
+        NaoqiTextToSpeechRequest("Nice tunes!")
+    )

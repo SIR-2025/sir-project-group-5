@@ -14,6 +14,11 @@ This script runs a SICApplication that:
     * NAO camera view.
     * Live learning skeleton overlay.
     * Thumbnails of saved poses, highlighting the one currently replayed.
+
+UPDATE:
+- Adds a "ghost pose" overlay during learning:
+    * draw current live skeleton (white)
+    * draw target pose skeleton (grey) for the pose currently being checked
 """
 from __future__ import annotations
 
@@ -24,39 +29,46 @@ from os.path import abspath, join
 
 import cv2
 import numpy as np
-
-from sic_framework.core.sic_application import SICApplication
 from sic_framework.core import sic_logging
+from sic_framework.core.message_python2 import CompressedImageMessage
+from sic_framework.core.sic_application import SICApplication
 from sic_framework.devices import Nao
-from sic_framework.devices.nao import NaoqiTextToSpeechRequest
-from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
-from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
 from sic_framework.devices.common_naoqi.naoqi_autonomous import (
     NaoRestRequest,
     NaoSetAutonomousLifeRequest,
     NaoWakeUpRequest,
 )
-from sic_framework.core.message_python2 import CompressedImageMessage
 from sic_framework.devices.common_naoqi.naoqi_motion import (
     NaoqiAnimationRequest,
     NaoPostureRequest,
 )
+from sic_framework.devices.nao import NaoqiTextToSpeechRequest
 from sic_framework.services.dialogflow_cx.dialogflow_cx import (
     DialogflowCX,
     DialogflowCXConf,
     DetectIntentRequest,
 )
-from sic_framework.devices.common_naoqi.naoqi_microphone import (
-    NaoqiMicrophone,  # Keep this for regular mic usage
-)
-import qi  # Add this import for direct NAOqi access
 
-from runners.teacher_runner import run_teacher
+from modules.replicate_json_pose import Pose
 from runners.learner_runner import run_learner
 from runners.song_runner import run_song
-from modules.replicate_json_pose import Pose
+from runners.teacher_runner import run_teacher
 
-INTENTS = ["shut-down", "Default Welcome Intent", "generate_a_song", "nao_wants_to_learn", "nao_learns","nao_learning_completed", "user_wants_to_learn", "nao_conversation_repeat", "user_learns_dance", "nao_check_dance", "nao_dance_completed_check", "user_thanks", "nao_bye"]
+INTENTS = [
+    "shut-down",
+    "Default Welcome Intent",
+    "generate_a_song",
+    "nao_wants_to_learn",
+    "nao_learns",
+    "nao_learning_completed",
+    "user_wants_to_learn",
+    "nao_conversation_repeat",
+    "user_learns_dance",
+    "nao_check_dance",
+    "nao_dance_completed_check",
+    "user_thanks",
+    "nao_fourthwall_bye",
+]
 
 # MediaPipe-style body indices and connections for drawing skeletons.
 BODY_IDXS = list(range(11, 33))
@@ -78,7 +90,7 @@ class NaoTeachMode(SICApplication):
         super(NaoTeachMode, self).__init__()
         self.set_log_level(sic_logging.INFO)
 
-        self.nao_ip = "10.0.0.154"  # <- adjust to your NAO IP
+        self.nao_ip = "10.0.0.183"  # <- adjust to your NAO IP
         self.keyfile_path = abspath(join("conf", "google", "google-key.json"))
 
         self.nao: Nao | None = None
@@ -108,13 +120,15 @@ class NaoTeachMode(SICApplication):
 
         # live mediapipe skeleton while teaching/learning
         self._learning_kp: np.ndarray | None = None
+        self._learning_dist: float = float("inf")
+        self._learning_pose_idx: int | None = None  # <-- which pose is being checked right now (for ghost)
+
         self._learning_active: bool = False
 
         self._overlay_lock = threading.Lock()
 
         self.last_intent = None
-        
-        # NEW: TTS lock to prevent microphone interference
+
         self._tts_lock = threading.Lock()
 
         self.setup()
@@ -196,11 +210,7 @@ class NaoTeachMode(SICApplication):
     # Camera handling
     # ----------------------------------------------------------
     def _on_image(self, msg: CompressedImageMessage):
-        """Camera callback: store latest frame as BGR for OpenCV.
-
-        SIC / NAO provide RGB images. We convert once to BGR and keep only
-        the latest frame, which is then used by the GUI and teacher module.
-        """
+        """Camera callback: store latest frame as BGR for OpenCV."""
         img = msg.image
         if img is None:
             return
@@ -227,15 +237,21 @@ class NaoTeachMode(SICApplication):
     def _on_pose_learned(self, idx: int) -> None:
         """Optional callback when a pose is successfully imitated."""
         try:
-            # This is the only other explicit TTS call in your code
             self.safe_say(f"Nice! You matched pose number {idx + 1}.")
         except Exception:
             self.logger.exception("Error while giving TTS feedback on pose learned")
 
-    def _on_learning_frame_kp(self, kp: np.ndarray | None) -> None:
-        """Update the live learning skeleton for the last processed frame."""
+    def _on_learning_frame_kp(
+            self,
+            kp: np.ndarray | None,
+            dist: float = float("inf"),
+            idx: int | None = None,
+    ) -> None:
+        """Accept both teacher calls (kp) and learner calls (kp, dist, idx)."""
         with self._overlay_lock:
             self._learning_kp = kp
+            self._learning_dist = dist
+            self._learning_pose_idx = idx
 
     def _draw_pose_skeleton_in_roi(
         self,
@@ -243,13 +259,7 @@ class NaoTeachMode(SICApplication):
         kp_img_norm: np.ndarray,
         color: tuple[int, int, int],
     ) -> None:
-        """Draw a pose skeleton into a given ROI using normalized coordinates.
-
-        Args:
-            roi: Image region (BGR) to draw into.
-            kp_img_norm: (33, 2/3) normalized keypoints in [0, 1].
-            color: BGR color for lines and joints.
-        """
+        """Draw a pose skeleton into a given ROI using normalized coordinates."""
         h, w = roi.shape[:2]
         for a, b in BODY_CONNS:
             xa, ya = int(kp_img_norm[a, 0] * w), int(kp_img_norm[a, 1] * h)
@@ -260,10 +270,7 @@ class NaoTeachMode(SICApplication):
             cv2.circle(roi, (x, y), 3, color, -1)
 
     def _draw_pose_thumbnails(self, frame: np.ndarray) -> None:
-        """Draw saved poses as small overlays at the bottom of the camera view.
-
-        The currently executed pose (if any) is highlighted in green.
-        """
+        """Draw saved poses as small overlays at the bottom of the camera view."""
         h, w = frame.shape[:2]
 
         with self._overlay_lock:
@@ -315,20 +322,29 @@ class NaoTeachMode(SICApplication):
             )
 
     def _draw_learning_skeleton(self, frame: np.ndarray) -> None:
-        """Draw the live MediaPipe skeleton during the learning phase.
+        """Draw the live MediaPipe skeleton plus ghost target during learning.
 
-        The skeleton for the last processed frame is mirrored horizontally
-        (to match the mirrored camera view) and drawn over the full frame.
+        - Live skeleton: white
+        - Target pose (ghost): grey, for the pose index currently being checked
         """
         with self._overlay_lock:
             kp = self._learning_kp
+            pose_idx = self._learning_pose_idx
+            taught_poses = list(self._taught_poses)
 
+        # Draw target "ghost" first (behind)
+        if pose_idx is not None and 0 <= pose_idx < len(taught_poses):
+            target_kp = taught_poses[pose_idx].kp_img_norm
+            target_draw = target_kp.copy()
+            target_draw[:, 0] = 1.0 - target_draw[:, 0]  # mirror to match camera flip
+            self._draw_pose_skeleton_in_roi(frame, target_draw, (160, 160, 160))
+
+        # Draw live skeleton on top
         if kp is None:
             return
 
         kp_draw = kp.copy()
-        kp_draw[:, 0] = 1.0 - kp_draw[:, 0]
-
+        kp_draw[:, 0] = 1.0 - kp_draw[:, 0]  # mirror to match camera flip
         self._draw_pose_skeleton_in_roi(frame, kp_draw, (255, 255, 255))
 
     # ----------------------------------------------------------
@@ -365,9 +381,8 @@ class NaoTeachMode(SICApplication):
 
         self.logger.info(f"Fulfillment message: {repr(text)}")
 
-        # Dialogflow handles TTS via fulfillment messages
         if text:
-            self.safe_say(text)  # Only change: use safe_say for Dialogflow responses
+            self.safe_say(text)
 
         match intent:
             case "generate_a_song":
@@ -376,7 +391,7 @@ class NaoTeachMode(SICApplication):
                 self.start_teaching_mode()
             case "user_learns_dance":
                 self.start_learning_mode()
-            case 'nao_bye':
+            case "nao_fourthwall_bye":
                 self.nao.motion.request(
                     NaoqiAnimationRequest("animations/Stand/Gestures/BowShort_3"),
                     block=True,
@@ -394,9 +409,7 @@ class NaoTeachMode(SICApplication):
         """Start the teaching routine in a background thread if not active."""
         with self._lock:
             if self.is_teaching or self.is_learning:
-                self.nao.tts.request(
-                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
-                )
+                self.nao.tts.request(NaoqiTextToSpeechRequest("I'm already busy with a dance."))
                 return
             self.is_teaching = True
 
@@ -405,9 +418,10 @@ class NaoTeachMode(SICApplication):
             try:
                 with self._overlay_lock:
                     self._overlay_poses = []
-                    self._taught_poses = []       # clear poses of this session
+                    self._taught_poses = []
                     self._active_pose_idx = None
                     self._learning_kp = None
+                    self._learning_pose_idx = None
                     self._learning_active = True
 
                 run_teacher(
@@ -420,19 +434,18 @@ class NaoTeachMode(SICApplication):
                     on_kp_frame=self._on_learning_frame_kp,
                 )
             finally:
-                # Return to alive mode after teaching
                 try:
                     self.logger.info("Returning NAO to alive mode...")
                     self.nao.motion.request(NaoPostureRequest("Stand", 0.5))
                     time.sleep(0.5)
-                    # Re-enable autonomous life (solitary mode)
                     self.nao.autonomous.request(NaoSetAutonomousLifeRequest("solitary"))
                 except Exception as e:
                     self.logger.exception("Error returning to alive mode: %s", e)
-                
+
                 with self._overlay_lock:
                     self._learning_active = False
                     self._learning_kp = None
+                    self._learning_pose_idx = None
                     self._active_pose_idx = None
                 with self._lock:
                     self.is_teaching = False
@@ -443,40 +456,28 @@ class NaoTeachMode(SICApplication):
         """Start the song generation routine in a background thread if not active."""
         with self._lock:
             if self.is_teaching or self.is_learning:
-                self.nao.tts.request(
-                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
-                )
+                self.nao.tts.request(NaoqiTextToSpeechRequest("I'm already busy with a dance."))
                 return
-            self.is_learning = True  # mark busy (same as learning)
+            self.is_learning = True
 
         def _song_thread():
-            """Worker thread that runs the song generator pipeline."""
             try:
-                # Clear overlays; this mode does not need skeleton drawing
                 with self._overlay_lock:
                     self._active_pose_idx = None
                     self._learning_kp = None
+                    self._learning_pose_idx = None
                     self._learning_active = False
-
 
                 run_song(
                     nao=self.nao,
                     dialogflow_cx=self.dialogflow,
                     session_id=int(self.session_id),
                     logger=self.logger,
-                    nao_ip=self.nao_ip,          
+                    nao_ip=self.nao_ip,
                 )
 
-
-                # Song done
-                self.nao.tts.request(
-                    NaoqiTextToSpeechRequest(
-                        "Your song is ready! I hope you enjoyed it!"
-                    )
-                )
-
+                self.nao.tts.request(NaoqiTextToSpeechRequest("Your song is ready! I hope you enjoyed it!"))
             finally:
-                # Reset busy state
                 with self._lock:
                     self.is_learning = False
 
@@ -486,9 +487,7 @@ class NaoTeachMode(SICApplication):
         """Start the learning routine in a background thread if not active."""
         with self._lock:
             if self.is_teaching or self.is_learning:
-                self.nao.tts.request(
-                    NaoqiTextToSpeechRequest("I'm already busy with a dance.")
-                )
+                self.nao.tts.request(NaoqiTextToSpeechRequest("I'm already busy with a dance."))
                 return
             self.is_learning = True
 
@@ -496,11 +495,8 @@ class NaoTeachMode(SICApplication):
             poses_to_use = list(self._taught_poses)
 
         if not poses_to_use:
-            # No poses from this session: nothing to learn
             self.nao.tts.request(
-                NaoqiTextToSpeechRequest(
-                    "You need to teach me a dance first, then we can practice it."
-                )
+                NaoqiTextToSpeechRequest("You need to teach me a dance first, then we can practice it.")
             )
             with self._lock:
                 self.is_learning = False
@@ -512,17 +508,18 @@ class NaoTeachMode(SICApplication):
                 with self._overlay_lock:
                     self._active_pose_idx = None
                     self._learning_kp = None
+                    self._learning_pose_idx = None
                     self._learning_active = True
 
                 def _learner_on_kp_frame(kp, dist, idx):
-                    self._on_learning_frame_kp(kp)
+                    self._on_learning_frame_kp(kp, dist, idx)
 
                 run_learner(
                     nao=self.nao,
                     nao_ip=self.nao_ip,
                     frame_provider=self.get_latest_frame,
                     logger=self.logger,
-                    poses=poses_to_use,                    # <-- only these poses
+                    poses=poses_to_use,
                     on_pose_demo_start=self._on_pose_start,
                     on_pose_learned=self._on_pose_learned,
                     on_kp_frame=_learner_on_kp_frame,
@@ -531,6 +528,7 @@ class NaoTeachMode(SICApplication):
                 with self._overlay_lock:
                     self._learning_active = False
                     self._learning_kp = None
+                    self._learning_pose_idx = None
                     self._active_pose_idx = None
                 with self._lock:
                     self.is_learning = False
@@ -539,27 +537,22 @@ class NaoTeachMode(SICApplication):
 
     def stop_teaching_mode(self):
         """Handle stop_teaching intent (placeholder for more advanced logic)."""
-        self.nao.tts.request(
-            NaoqiTextToSpeechRequest("Got it! Let's stop for now.")
-        )
+        self.nao.tts.request(NaoqiTextToSpeechRequest("Got it! Let's stop for now."))
 
-    # NEW: clean shutdown method
+    # Clean shutdown method (keep one copy)
     def shutdown_nao(self):
-        """Clean shutdown: stop teaching, rest NAO, stop all threads and exit."""
+        """Clean shutdown: rest NAO, stop threads, exit."""
         self.logger.info("Shutdown intent received. Initiating clean shutdown...")
-        
-        # Acknowledge shutdown
+
         try:
             self.nao.tts.request(NaoqiTextToSpeechRequest("Goodbye! Shutting down now."))
-            time.sleep(1.5)  # give TTS time to finish
+            time.sleep(1.5)
         except Exception:
             pass
 
-        # Stop teaching if active
         with self._lock:
             self.is_teaching = False
 
-        # Put NAO to rest position
         try:
             self.logger.info("Putting NAO to rest position...")
             self.nao.autonomous.request(NaoRestRequest())
@@ -567,61 +560,15 @@ class NaoTeachMode(SICApplication):
         except Exception as e:
             self.logger.exception("Error while sending NaoRestRequest: %s", e)
 
-        # Stop camera
         try:
             self.logger.info("Stopping camera...")
             self.nao.top_camera.unregister_callback(self._on_image)
         except Exception as e:
             self.logger.exception("Error stopping camera: %s", e)
 
-        # Signal main loop to exit
         self._should_exit.set()
         self.shutdown_event.set()
 
-    # Override parent exit_handler to prevent harmless sys.exit(0) exceptions
-    def exit_handler(self, *args, **kwargs):
-        """Override to prevent sys.exit(0) during atexit."""
-        try:
-            super().exit_handler(*args, **kwargs)
-        except SystemExit:
-            pass
-
-    # NEW: clean shutdown method
-    def shutdown_nao(self):
-        """Clean shutdown: stop teaching, rest NAO, stop all threads and exit."""
-        self.logger.info("Shutdown intent received. Initiating clean shutdown...")
-        
-        # Acknowledge shutdown
-        try:
-            self.nao.tts.request(NaoqiTextToSpeechRequest("Goodbye! Shutting down now."))
-            time.sleep(1.5)  # give TTS time to finish
-        except Exception:
-            pass
-
-        # Stop teaching if active
-        with self._lock:
-            self.is_teaching = False
-
-        # Put NAO to rest position
-        try:
-            self.logger.info("Putting NAO to rest position...")
-            self.nao.autonomous.request(NaoRestRequest())
-            time.sleep(0.5)
-        except Exception as e:
-            self.logger.exception("Error while sending NaoRestRequest: %s", e)
-
-        # Stop camera
-        try:
-            self.logger.info("Stopping camera...")
-            self.nao.top_camera.unregister_callback(self._on_image)
-        except Exception as e:
-            self.logger.exception("Error stopping camera: %s", e)
-
-        # Signal main loop to exit
-        self._should_exit.set()
-        self.shutdown_event.set()
-
-    # Override parent exit_handler to prevent harmless sys.exit(0) exceptions
     def exit_handler(self, *args, **kwargs):
         """Override to prevent sys.exit(0) during atexit."""
         try:
@@ -640,22 +587,18 @@ class NaoTeachMode(SICApplication):
 
         # Start Dialogflow in background thread
         self._df_stop.clear()
-        self._df_thread = threading.Thread(
-            target=self._dialogflow_loop,
-            daemon=True,
-        )
+        self._df_thread = threading.Thread(target=self._dialogflow_loop, daemon=True)
         self._df_thread.start()
 
         try:
-            # Initial greeting - only explicit TTS call in run()
             self.safe_say("Hello")
 
-            # Main loop now checks both shutdown_event and _should_exit
             while not self.shutdown_event.is_set() and not self._should_exit.is_set():
                 frame = self.get_latest_frame()
                 if frame is not None:
                     frame_bgr = np.ascontiguousarray(frame)
                     frame_bgr = cv2.flip(frame_bgr, 1)
+
                     scale = 2.0
                     h, w = frame_bgr.shape[:2]
                     frame_bgr = cv2.resize(frame_bgr, (int(w * scale), int(h * scale)))
@@ -666,9 +609,8 @@ class NaoTeachMode(SICApplication):
                     self._draw_pose_thumbnails(frame_bgr)
 
                     cv2.imshow(camera_window, frame_bgr)
-                    
-                    # Check for 'q' key to manually exit as well
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
+
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
                         self.logger.info("'q' pressed - initiating shutdown")
                         self.shutdown_nao()
                         break
@@ -679,19 +621,16 @@ class NaoTeachMode(SICApplication):
             self.logger.info("Interrupted by user.")
         finally:
             self.logger.info("Cleaning up resources...")
-            
-            # Stop Dialogflow thread
+
             self._df_stop.set()
             if self._df_thread is not None:
                 self._df_thread.join(timeout=2.0)
 
-            # Stop camera if not already stopped
             try:
                 self.nao.top_camera.unregister_callback(self._on_image)
             except Exception:
                 pass
 
-            # Final rest request if not already done
             try:
                 self.nao.autonomous.request(NaoRestRequest())
             except Exception:
@@ -699,7 +638,6 @@ class NaoTeachMode(SICApplication):
 
             cv2.destroyAllWindows()
             self.shutdown()
-            
             self.logger.info("Shutdown complete.")
 
 
