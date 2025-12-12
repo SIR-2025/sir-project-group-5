@@ -2,7 +2,6 @@ import os
 import time
 import wave
 import threading
-
 import requests
 from dotenv import load_dotenv
 from pydub import AudioSegment
@@ -157,22 +156,6 @@ async def transcript_with_timeout(dialogflow_cx, session_id: int, timeout = 30.0
     except asyncio.TimeoutError:
         return None
     
-def threading_for_transcript(dialogflow_cx, session_id: int, timeout = 30.0):
-    result = {'reply': None,"error": None}
-    def worker():
-        try:
-            
-            result['reply'] = asyncio.run(transcript_with_timeout(dialogflow_cx, session_id, timeout=timeout))
-        except Exception as e:
-            result['error'] = e
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start() 
-    thread.join(timeout+1.0)
-    if thread.is_alive():
-        return None
-    if result['error']:
-        raise result['error']
-    return result['reply']
 
 def stretching_routine(nao, logger=None):
     log = logger.info if logger else print
@@ -232,7 +215,7 @@ def stretching_routine(nao, logger=None):
 
 
 
-def song_generation_with_exercise(
+async def song_generation_with_exercise(
     nao,
     dialogflow_cx,
     session_id: int,
@@ -256,7 +239,7 @@ def song_generation_with_exercise(
             )
         )
         log("Song generation: asking user for style via Dialogflow.")
-        reply = threading_for_transcript(dialogflow_cx, session_id, timeout=10.0)
+        reply = await transcript_with_timeout(dialogflow_cx, session_id, timeout=10.0)
        
 
         if getattr(reply, "transcript", None):
