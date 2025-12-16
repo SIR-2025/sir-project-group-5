@@ -1,95 +1,164 @@
-# SIR Project - Group 5  
-### NAO Interactive Dance Teacher
+# SIR Project – Group 5  
+## NAO Interactive Dance Teacher
 
-This project implements a fully interactive NAO robot behavior where NAO:
+This project implements a fully interactive multimodal behavior for the NAO robot, where NAO can generate music, observe human movement, learn dance poses, and teach the learned choreography to new users.
 
-1. **Greets a user and generates a custom song** (via Dialogflow CX + TTS).  
-2. **Watches the user dance** using its camera.  
-3. **Records multiple static dance poses** using MediaPipe Pose.  
-4. **Mirrors and maps human poses to NAO joints**, replaying the dance back.  
-5. **Teaches the learned dance** to the next person that interacts with it.
+The system integrates speech, vision, motion, and audio generation into a single real-time pipeline using the SIC Framework, Dialogflow CX, MediaPipe Pose, and external music generation services.
 
-The full pipeline is multimodal (vision + speech) and runs live on the NAO robot using SIC Framework components.
+---
+
+## Project Overview
+
+During an interaction, NAO is able to:
+
+1. **Greet the user and hold a spoken conversation** using Dialogflow CX.
+2. **Generate a custom song** based on the user’s requested style.
+3. **Play the generated music** through NAO’s speakers.
+4. **Observe the user dancing** via NAO’s camera.
+5. **Record multiple static dance poses** using MediaPipe Pose.
+6. **Replay the recorded dance** by mapping human poses to NAO’s joints.
+7. **Teach the learned dance** to a new user, pose by pose, validating imitation in real time.
+
+The system is designed to be **interactive, robust, and modular**, with all UI and visualization handled exclusively in `main.py`.
 
 ---
 
 ## Entry Point
 
-# For all Python dependencies, install requirements.txt: 
+### Installation
+
+Install all required Python dependencies:
+
+```bash
 pip install -r requirements.txt
+```
 
+Make sure you also provide:
 
-Run:
+- A valid Dialogflow CX service account key
+- Required API keys (OpenAI / Suno) via .env
+
+## Run the Application
+
 ```bash
 python main.py
 ```
 
-`main.py` launches the interactive application (`NaoTeachMode`) which handles:
-
-- NAO initialization (camera, mic, TTS, motion, LEDs)  
-- Dialogflow CX communication  
-- Pose learning & playback  
-- Live OpenCV GUI with skeleton overlays  
-- Intent-based behavior switching (e.g., “start teaching”)  
+This launches the main interactive application (NaoTeachMode).
 
 ---
 
-## Modules
+### Main Application (main.py)
 
-### `modules/pose_teacher.py`
-Headless MediaPipe-based pose recording system:
-- Captures poses every few seconds  
-- Outputs JSON & in-memory pose objects  
-- Supports GUI callbacks for live feedback  
+main.py is the central orchestrator of the entire system. It is responsible for:
 
-### `modules/replicate_json_pose.py`
-Converts normalized MediaPipe keypoints to NAO joint angles  
-and executes the corresponding NAO motion:
-- Shoulder & elbow inference  
-- Joint limit clamping  
-- Mirroring for camera alignment  
+- Initializing NAO (camera, microphone, motion, LEDs, TTS)
+- Running the Dialogflow CX intent loop
+- Managing interaction states (idle, teaching, learning, song generation)
+- Rendering the OpenCV GUI:
+- Live camera feed
+- Live skeleton overlay
+- “Ghost pose” overlays during learning
+- Pose thumbnails
+- Routing callbacks between headless modules and the UI
+- Starting and stopping background threads safely
 
-### `runners/teacher_runner.py`
-Simple wrapper used by the main application to drive recording and playback.
-
-### `main.py`
-Full application logic:
-- Dialogflow loop  
-- Intent routing  
-- Camera UI and overlays  
-- Teaching workflow (record → playback → teach)  
-### demo_nao_song_speech_rec.py
-Generates song based on user input:
--extracts the topic/style the user wants
--creates lyrics if requested
--creates either instrumental or lyrics based song 
--plays the song on naos audio
+All drawing and visualization logic lives only in main.py.
 
 ---
 
-## Dialogflow CX
+### Core Modules
 
-Use voice commands such as:
+#### modules/pose_teacher.py
 
-- **“Start teaching”**  
-- **“Stop teaching”**  
-- (Extendable to custom commands for music, conversation, etc.)
+Headless pose learning logic based on MediaPipe Pose.
 
-NAO replies using TTS and executes appropriate behaviors.
+Responsibilities:
+
+- Run MediaPipe Pose on camera frames
+- Extract and normalize keypoints
+- Compute pose similarity metrics
+
+This module:
+
+- Opens no windows
+- Performs no drawing
+- Contains no UI logic
 
 ---
 
-## Directory Structure
+#### modules/pose_learner.py
 
+Headless pose teaching logic based on MediaPipe Pose.
+
+Responsibilities:
+
+- Decide when a pose is successfully imitated
+- Report pose state back to main.py via callbacks
+
+---
+
+#### modules/replicate_json_pose.py
+
+Pose-to-robot motion mapping module.
+
+Responsibilities:
+
+- Convert normalized MediaPipe keypoints into NAO joint angles
+- Infer shoulder and elbow configurations
+- Clamp values to NAO joint limits
+- Apply mirroring for camera alignment
+- Send motion commands via SIC (no direct qi dependency)
+
+---
+
+#### modules/song_generator.py
+
+Song generation pipeline.
+
+Responsibilities:
+
+- Extract musical style from free-form user speech
+- Generate instrumental or lyrical music tracks
+- Download, convert, and trim audio (≤ 40 seconds)
+- Prepare audio for NAO playback
+
+---
+
+### Runners
+
+Every module has its own runner in order to be executed inside of a script or as a standalone application
+
+---
+
+### Directory Structure
 ```
 main.py
 modules/
-pose_teacher.py
-replicate_json_pose.py
+│   pose_teacher.py
+│   pose_learner.py
+│   replicate_json_pose.py
+│   song_generator.py
 runners/
-teacher_runner.py
+│   teacher_runner.py
+│   learner_runner.py
+│   song_runner.py
 conf/
-google/google-key.json
+│   google/
+│       google-key.json
 poses/
+music/
+requirements.txt
+README.md
 ```
----
+
+### Result
+
+The final system allows NAO to act as an interactive dance teacher that:
+- Listens
+- Watches
+- Learns
+- Teaches
+- And adapts to each new user
+
+All in a single, cohesive multimodal pipeline.

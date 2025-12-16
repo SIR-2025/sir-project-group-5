@@ -31,7 +31,6 @@ import qi
 
 logger = logging.getLogger(__name__)
 
-# --- Constants -------------------------------------------------------------
 
 ARM_JOINTS = [
     "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll",
@@ -67,8 +66,6 @@ MIN_SEGMENT_LEN = 0.03
 ELBOW_STRAIGHT_THRESHOLD = math.radians(15.0)
 
 
-# --- Debug helpers ---------------------------------------------------------
-
 def _format_angles(angles: Dict[str, float], to_degrees: bool = True) -> str:
     parts = []
     for name in ALL_JOINTS:
@@ -87,8 +84,6 @@ def _debug_log_angles(angles: Dict[str, float], prefix: str = "ANGLES") -> None:
         pass
 
 
-# --- Pose container --------------------------------------------------------
-
 @dataclass(frozen=True)
 class Pose:
     """In-memory pose with 33 normalized keypoints."""
@@ -101,8 +96,6 @@ class Pose:
         object.__setattr__(self, "kp_img_norm", kp)
 
 
-# --- Utility functions -----------------------------------------------------
-
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
@@ -114,8 +107,6 @@ def _safe_asin(x: float) -> float:
 def _safe_acos(x: float) -> float:
     return math.acos(max(-1.0, min(1.0, x)))
 
-
-# --- Arm angle computation -------------------------------------------------
 
 def _compute_single_arm_angles(
     shoulder: np.ndarray,
@@ -177,10 +168,10 @@ def _compute_single_arm_angles(
     vertical = ua[1]  # positive = arm pointing up
     
     logger.debug(f"{prefix} arm direction: lateral={lateral:.3f}, vertical={vertical:.3f}")
-    
+
     # === SHOULDER PITCH ===
     # Pitch controls the up/down angle of the arm in the sagittal plane
-    # 
+    #
     # NAO convention:
     #   pitch = -90° → arm points UP
     #   pitch = 0°   → arm points FORWARD (horizontal)
@@ -194,7 +185,7 @@ def _compute_single_arm_angles(
     #
     # Simple mapping: pitch = -arcsin(vertical) * (π/2) / (π/2) = -arcsin(vertical)
     # But arcsin only gives -90° to +90°, which is exactly our range!
-    
+
     pitch = -_safe_asin(vertical) * (math.pi / 2) / (math.pi / 2)
     # Simplifies to:
     pitch = -_safe_asin(vertical)
@@ -359,7 +350,7 @@ def _compute_arm_angles_from_kp_norm(
     mp_l_wrist = get_point(L_WRIST)
     mp_r_wrist = get_point(R_WRIST)
     
-    # When mirrored (person facing camera):
+    # When mirrored:
     # - Person's left arm appears on right side of image
     # - After X flip, person's left is at high X (robot's left side)
     # - Robot's left arm should mimic person's left arm (mirrored)
@@ -411,8 +402,6 @@ def _compute_arm_angles_from_kp_norm(
     return all_angles
 
 
-# --- Robot control ---------------------------------------------------------
-
 def _set_robot_pose(
     nao_ip: str,
     angles: Dict[str, float],
@@ -453,8 +442,6 @@ def _set_robot_pose(
         except Exception:
             logger.exception("Failed to set angles on NAO")
 
-
-# --- Public API ------------------------------------------------------------
 
 def replicate_pose_from_kp(
     kp_img_norm: List[List[float]] | np.ndarray,

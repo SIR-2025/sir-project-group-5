@@ -27,7 +27,6 @@ import cv2
 import mediapipe as mp
 import numpy as np
 from sic_framework import AudioRequest
-from sic_framework.devices.common_naoqi.naoqi_autonomous import NaoRestRequest
 from sic_framework.devices.common_naoqi.naoqi_leds import NaoFadeRGBRequest
 from sic_framework.devices.common_naoqi.naoqi_motion import NaoPostureRequest
 from sic_framework.devices.common_naoqi.naoqi_text_to_speech import (
@@ -42,10 +41,6 @@ mp_pose = mp.solutions.pose
 # Body joints used for comparison (MediaPipe indices)
 BODY_IDXS = list(range(11, 33))
 
-
-# ------------------------------------------------------------
-# Logging helper
-# ------------------------------------------------------------
 def load_poses_from_dir(pose_dir: str) -> List[Pose]:
     """Load Pose objects from a directory of JSON files.
 
@@ -82,9 +77,6 @@ def _log(logger, msg: str) -> None:
         print(msg)
 
 
-# ------------------------------------------------------------
-# Pose helpers
-# ------------------------------------------------------------
 def _landmarks_to_array(landmarks) -> np.ndarray:
     """Convert MediaPipe pose landmarks to (33, 3) float32 array."""
     return np.array(
@@ -125,10 +117,6 @@ def _pose_distance(a: np.ndarray, b: np.ndarray) -> float:
     nb = _normalize_kp_for_comparison(b)
     return float(np.linalg.norm(na - nb, axis=1).mean())
 
-
-# ------------------------------------------------------------
-# Audio helper
-# ------------------------------------------------------------
 def play_audio(nao, wav_path: str, logger=None):
     """Play a WAV file through NAO's speaker."""
     log = logger.info if logger else print
@@ -141,10 +129,6 @@ def play_audio(nao, wav_path: str, logger=None):
     msg = AudioRequest(sample_rate=samplerate, waveform=bytes(data))
     nao.speaker.request(msg)
 
-
-# ------------------------------------------------------------
-# Imitation check
-# ------------------------------------------------------------
 def wait_for_imitation(
     target_pose: Pose,
     frame_provider: Callable[[], np.ndarray | None],
@@ -216,10 +200,6 @@ def wait_for_imitation(
 
             time.sleep(0.01)
 
-
-# ------------------------------------------------------------
-# Learning routine (NAO teaches human)
-# ------------------------------------------------------------
 def learn_sequence(
     nao,
     nao_ip: str,

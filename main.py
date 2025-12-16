@@ -61,13 +61,13 @@ INTENTS = [
     "nao_wants_to_learn",
     "nao_learns",
     "nao_learning_completed",
+    "new_user_enters",
     "user_wants_to_learn",
-    "nao_conversation_repeat",
     "user_learns_dance",
     "nao_check_dance",
     "nao_dance_completed_check",
     "user_thanks",
-    "nao_fourthwall_bye",
+    "nao_bye",
 ]
 
 # MediaPipe-style body indices and connections for drawing skeletons.
@@ -90,7 +90,8 @@ class NaoTeachMode(SICApplication):
         super(NaoTeachMode, self).__init__()
         self.set_log_level(sic_logging.INFO)
 
-        self.nao_ip = "10.0.0.183"  # <- adjust to your NAO IP
+        # self.nao_ip = "192.168.0.231"  # 14
+        self.nao_ip = "192.168.0.25"  # 3
         self.keyfile_path = abspath(join("conf", "google", "google-key.json"))
 
         self.nao: Nao | None = None
@@ -121,7 +122,7 @@ class NaoTeachMode(SICApplication):
         # live mediapipe skeleton while teaching/learning
         self._learning_kp: np.ndarray | None = None
         self._learning_dist: float = float("inf")
-        self._learning_pose_idx: int | None = None  # <-- which pose is being checked right now (for ghost)
+        self._learning_pose_idx: int | None = None
 
         self._learning_active: bool = False
 
@@ -133,9 +134,6 @@ class NaoTeachMode(SICApplication):
 
         self.setup()
 
-    # ----------------------------------------------------------
-    # Setup: NAO + camera + Dialogflow
-    # ----------------------------------------------------------
     def setup(self):
         """Initialize NAO, register camera callback, and set up Dialogflow."""
         self.logger.info("Initializing NAO...")
@@ -179,9 +177,6 @@ class NaoTeachMode(SICApplication):
             "or 'start learning' to practice the dance together."
         )
 
-    # ----------------------------------------------------------
-    # Camera handling
-    # ----------------------------------------------------------
     def _on_image(self, msg: CompressedImageMessage):
         """Camera callback: store latest frame as BGR for OpenCV."""
         img = msg.image
@@ -193,9 +188,6 @@ class NaoTeachMode(SICApplication):
         """Return the latest camera frame as BGR, or None if unavailable."""
         return self._last_frame
 
-    # ----------------------------------------------------------
-    # Overlay helpers (poses + live learning skeleton)
-    # ----------------------------------------------------------
     def _on_pose_saved(self, pose: Pose, idx: int) -> None:
         """Store kp_img_norm for overlay every time a pose is recorded."""
         with self._overlay_lock:
@@ -320,9 +312,6 @@ class NaoTeachMode(SICApplication):
         kp_draw[:, 0] = 1.0 - kp_draw[:, 0]  # mirror to match camera flip
         self._draw_pose_skeleton_in_roi(frame, kp_draw, (255, 255, 255))
 
-    # ----------------------------------------------------------
-    # Dialogflow recognition callback (partial results)
-    # ----------------------------------------------------------
     def on_recognition(self, message):
         """Handle streaming recognition results from Dialogflow (speech)."""
         if message.response:
@@ -330,9 +319,6 @@ class NaoTeachMode(SICApplication):
             if rr and getattr(rr, "is_final", False):
                 self.logger.info(f"[{self.last_intent}] User said: {rr.transcript}")
 
-    # ----------------------------------------------------------
-    # Dialogflow intent polling loop (runs in background thread)
-    # ----------------------------------------------------------
     def _dialogflow_loop(self):
         """Continuously poll Dialogflow CX for final intents in a thread."""
         try:
@@ -344,9 +330,6 @@ class NaoTeachMode(SICApplication):
         except Exception as e:
             self.logger.exception("Dialogflow loop crashed: %s", e)
 
-    # ----------------------------------------------------------
-    # Intent handler
-    # ----------------------------------------------------------
     def handle_intent(self, reply):
         """Handle detected intent by triggering behaviors and TTS."""
         intent = getattr(reply, "intent", "") or ""
@@ -375,9 +358,6 @@ class NaoTeachMode(SICApplication):
         if intent in INTENTS:
             self.last_intent = intent
 
-    # ----------------------------------------------------------
-    # Behaviors
-    # ----------------------------------------------------------
     def start_teaching_mode(self):
         """Start the teaching routine in a background thread if not active."""
         with self._lock:
@@ -550,9 +530,6 @@ class NaoTeachMode(SICApplication):
         except SystemExit:
             pass
 
-    # ----------------------------------------------------------
-    # Main loop: show camera + run DF thread
-    # ----------------------------------------------------------
     def run(self):
         """Run the main event loop: camera UI + Dialogflow background thread."""
         camera_window = "NAO Camera"

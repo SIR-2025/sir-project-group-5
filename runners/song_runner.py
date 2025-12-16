@@ -19,7 +19,7 @@ def run_song(
     session_id: int,
     logger=None,
     max_wait_time: float = 600.0,
-    nao_ip: str | None = None,   # kept only for API symmetry; not used
+    nao_ip: str | None = None,
 ) -> None:
     """Run the synchronous song generation pipeline on a NAO robot.
 

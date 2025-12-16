@@ -186,7 +186,6 @@ def record_poses(
 
             frame = frame_provider()
             if frame is None:
-                # No frame available; wait a bit and retry.
                 time.sleep(0.01)
                 continue
 
@@ -242,7 +241,6 @@ def playback_poses(
 
         nao.leds.request(NaoFadeRGBRequest("FaceLeds", 1, 0, 0, 0))
         
-        # Never reset - flow smoothly from pose to pose
         replicate_pose(pose, nao_ip, mirror=True, duration=2.5, reset_to_standinit=False)
         
         nao.leds.request(NaoFadeRGBRequest("FaceLeds", 0, 1, 0, 0))
